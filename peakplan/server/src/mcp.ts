@@ -128,6 +128,38 @@ export function buildMcpServer(store: Store): McpServer {
     async ({ from, to }) => json(store.trainingSummary(from, to)),
   );
 
+  server.registerTool(
+    "review_completed_workouts",
+    {
+      title: "Review completed vs. planned",
+      description:
+        "Every completed, unplanned, missed or skipped workout between two dates with a TrainingPeaks-style compliance colour " +
+        "(green 80-120% of planned duration, yellow 50-150%, orange beyond, red missed/skipped), duration and TSS compliance, RPE and notes.",
+      inputSchema: { from: z.string().describe("YYYY-MM-DD"), to: z.string().describe("YYYY-MM-DD") },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ from, to }) =>
+      json(
+        store.review(from, to).map((i) => ({
+          ...i,
+          workout: i.workout ? summarize(i.workout) : null,
+        })),
+      ),
+  );
+
+  server.registerTool(
+    "compare_workout",
+    {
+      title: "Compare a workout with its plan, interval by interval",
+      description:
+        "For a planned workout: planned vs. actual totals and, when the Watch recorded one segment per step, each interval's " +
+        "actual avg power / HR / pace / cadence against its target (in_range / below = too easy or slow / above = too hard or fast).",
+      inputSchema: { id: z.string().describe("Planned workout id") },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ id }) => json(store.comparison(id)),
+  );
+
   // ----- writing -----
 
   server.registerTool(
@@ -239,7 +271,8 @@ export function buildMcpServer(store: Store): McpServer {
           content: {
             type: "text",
             text:
-              "Act as my endurance coach. Use get_athlete_profile, then get_training_summary and list_activities for the last 4 weeks, " +
+              "Act as my endurance coach. Use get_athlete_profile, then get_training_summary and review_completed_workouts for the last 4 weeks " +
+              "(use compare_workout on the key sessions to check intervals against targets), " +
               "and list_workouts for the next 7 days. Review compliance, load progression (CTL/ATL/TSB) and how I responded. " +
               "Then propose next week's plan, and after I confirm, create or update the workouts with structured intervals.",
           },

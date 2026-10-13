@@ -93,6 +93,16 @@ export interface Workout extends WorkoutInput {
   updatedAt: string;
 }
 
+export const Lap = z.object({
+  startOffsetSec: z.number().nonnegative(),
+  durationSec: z.number().nonnegative(),
+  distanceM: z.number().nullable().optional(),
+  avgHr: z.number().nullable().optional(),
+  avgPower: z.number().nullable().optional(),
+  avgCadence: z.number().nullable().optional(),
+});
+export type Lap = z.infer<typeof Lap>;
+
 export const ActivityInput = z.object({
   externalId: z.string().describe("Unique id from the source (e.g. HealthKit UUID)."),
   source: z.string().default("healthkit"),
@@ -111,6 +121,10 @@ export const ActivityInput = z.object({
   rpe: z.number().min(1).max(10).nullable().optional(),
   notes: z.string().default(""),
   workoutId: z.string().nullable().optional().describe("Planned workout this activity fulfils."),
+  laps: z
+    .array(Lap)
+    .default([])
+    .describe("One entry per workout step/segment as recorded by Apple Watch, in order."),
 });
 export type ActivityInput = z.infer<typeof ActivityInput>;
 

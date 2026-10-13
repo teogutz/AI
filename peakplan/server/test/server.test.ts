@@ -157,3 +157,30 @@ test("clients can clear date (move to library) with explicit null", async () => 
   assert.equal(moved.startTime, null);
   assert.equal(store.listWorkouts({ library: true }).length, 1);
 });
+
+test("review & interval comparison", () => {
+  const store = new Store(":memory:");
+  store.updateProfile({ ftpWatts: 250, lthrBpm: 165 });
+  const w = store.createWorkout(sweetSpot);
+  const missed = store.createWorkout({ ...sweetSpot, title: "Missed", date: "2026-10-01" });
+  const laps = [
+    { startOffsetSec: 0, durationSec: 600, avgPower: 150 },
+    ...[0, 1, 2].flatMap((i) => [
+      { startOffsetSec: 0, durationSec: 720, avgPower: i === 2 ? 205 : 228 }, // last rep faded
+      { startOffsetSec: 0, durationSec: 300, avgPower: 140 },
+    ]),
+    { startOffsetSec: 0, durationSec: 600 },
+  ];
+  store.upsertActivity({ externalId: "x", sport: "bike", startDate: "2026-10-14T06:30:00-06:00", durationSec: 4260, avgPower: 190, laps });
+
+  const c = store.comparison(w.id);
+  assert.equal(c.color, "green");
+  assert.equal(c.intervalsMatched, true);
+  assert.equal(c.steps[1].result, "in_range"); // 228 W vs 220-235
+  assert.equal(c.steps[5].result, "below"); // 205 W
+  assert.equal(c.steps[1].target?.low, 220);
+
+  const review = store.review("2026-09-28", "2026-10-20");
+  assert.equal(review.find((r) => r.workout?.id === missed.id)?.state, "missed");
+  assert.equal(review.find((r) => r.workout?.id === w.id)?.state, "completed");
+});

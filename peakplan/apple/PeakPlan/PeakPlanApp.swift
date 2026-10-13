@@ -76,9 +76,15 @@ enum SyncCoordinator {
 
     static func importHealth(_ store: TrainingStore) async {
         let importer = HealthImporter()
+        let key = "peakplan.uploadedHealthWorkouts"
+        let uploaded = Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
         do {
             try await importer.requestAuthorization()
-            await store.upload(try await importer.recentActivities(days: 14))
+            let new = try await importer.recentActivities(days: 14, excluding: uploaded)
+            guard !new.isEmpty, try await store.client?.upload(new) != nil else { return }
+            // Remember what was uploaded (bounded) so interval stats are not recomputed every sync.
+            let all = Array(uploaded) + new.map(\.externalId)
+            UserDefaults.standard.set(Array(all.suffix(500)), forKey: key)
         } catch {
             store.lastError = "Apple Health: \(error.localizedDescription)"
         }

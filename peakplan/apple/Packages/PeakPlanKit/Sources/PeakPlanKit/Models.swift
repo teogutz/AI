@@ -335,6 +335,8 @@ public struct ActivityDTO: Codable, Hashable, Identifiable, Sendable {
     public var notes: String
     public var workoutId: String?
     public var tss: Double?
+    /// One per workout step / segment recorded by the Watch.
+    public var laps: [LapDTO]?
 
     public init(externalId: String, sport: Sport, title: String, startDate: String, durationSec: Double) {
         self.externalId = externalId
@@ -345,6 +347,105 @@ public struct ActivityDTO: Codable, Hashable, Identifiable, Sendable {
         self.durationSec = durationSec
         self.notes = ""
     }
+}
+
+public struct LapDTO: Codable, Hashable, Sendable {
+    public var startOffsetSec: Double
+    public var durationSec: Double
+    public var distanceM: Double?
+    public var avgHr: Double?
+    public var avgPower: Double?
+    public var avgCadence: Double?
+
+    public init(startOffsetSec: Double, durationSec: Double) {
+        self.startOffsetSec = startOffsetSec
+        self.durationSec = durationSec
+    }
+}
+
+// MARK: - Review (planned vs. completed), computed by the server
+
+public enum ComplianceColor: String, Codable, Sendable { case green, yellow, orange, red }
+
+public struct ReviewItemDTO: Codable, Hashable, Identifiable, Sendable {
+    public enum State: String, Codable, Sendable { case completed, unplanned, missed, skipped }
+    public var date: String
+    public var state: State
+    public var color: ComplianceColor?
+    public var durationPct: Double?
+    public var tssPct: Double?
+    public var workout: WorkoutDTO?
+    public var activity: ActivityDTO?
+
+    public var id: String { activity?.id ?? workout?.id ?? date }
+
+    public init(date: String, state: State, color: ComplianceColor? = nil, durationPct: Double? = nil,
+                tssPct: Double? = nil, workout: WorkoutDTO? = nil, activity: ActivityDTO? = nil) {
+        self.date = date
+        self.state = state
+        self.color = color
+        self.durationPct = durationPct
+        self.tssPct = tssPct
+        self.workout = workout
+        self.activity = activity
+    }
+}
+
+public struct ComparisonDTO: Codable, Hashable, Sendable {
+    public struct Totals: Codable, Hashable, Sendable {
+        public struct Planned: Codable, Hashable, Sendable {
+            public var durationSec: Double?
+            public var distanceM: Double?
+            public var tss: Double?
+        }
+        public struct Actual: Codable, Hashable, Sendable {
+            public var durationSec: Double
+            public var distanceM: Double?
+            public var tss: Double?
+            public var avgHr: Double?
+            public var avgPower: Double?
+            public var rpe: Double?
+        }
+        public var planned: Planned
+        public var actual: Actual?
+        public var durationPct: Double?
+        public var distancePct: Double?
+        public var tssPct: Double?
+    }
+
+    public struct Target: Codable, Hashable, Sendable {
+        public var metric: String // power | heart_rate | pace | cadence
+        public var low: Double
+        public var high: Double
+        public var unit: String
+    }
+
+    public struct Step: Codable, Hashable, Identifiable, Sendable {
+        public enum Result: String, Codable, Sendable {
+            case inRange = "in_range", below, above
+        }
+        public var index: Int
+        public var kind: StepKind
+        public var name: String?
+        public var plannedDurationSec: Double?
+        public var plannedDistanceM: Double?
+        public var target: Target?
+        public var actualDurationSec: Double?
+        public var actualDistanceM: Double?
+        public var actualAvgHr: Double?
+        public var actualAvgPower: Double?
+        public var actualValue: Double?
+        public var result: Result?
+        public var id: Int { index }
+    }
+
+    public var workoutId: String
+    public var activityId: String?
+    public var color: ComplianceColor
+    public var totals: Totals
+    public var intervalsMatched: Bool
+    public var intervalsInRangePct: Double?
+    public var steps: [Step]
 }
 
 public struct AthleteProfile: Codable, Hashable, Sendable {

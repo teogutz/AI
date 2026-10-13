@@ -122,6 +122,19 @@ public final class TrainingStore {
         }
     }
 
+    public var client: APIClient? { api }
+
+    public func updateActivity(_ a: ActivityDTO, rpe: Double?, notes: String, workoutId: String?) async {
+        guard let api, let id = a.id else { return }
+        do {
+            let updated = try await api.updateActivity(id: id, rpe: rpe, notes: notes, workoutId: workoutId)
+            if let i = activities.firstIndex(where: { $0.id == id }) { activities[i] = updated }
+            await refresh() // linking changes workout statuses
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
     public func upload(_ newActivities: [ActivityDTO]) async {
         guard let api, !newActivities.isEmpty else { return }
         do {

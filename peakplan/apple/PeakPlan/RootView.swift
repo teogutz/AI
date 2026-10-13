@@ -2,12 +2,13 @@ import SwiftUI
 import PeakPlanKit
 
 enum AppSection: String, CaseIterable, Identifiable {
-    case today = "Today", calendar = "Calendar", library = "Library", fitness = "Fitness", settings = "Settings"
+    case today = "Today", calendar = "Calendar", review = "Review", library = "Library", fitness = "Fitness", settings = "Settings"
     var id: String { rawValue }
     var symbol: String {
         switch self {
         case .today: "sun.max"
         case .calendar: "calendar"
+        case .review: "checkmark.seal"
         case .library: "books.vertical"
         case .fitness: "chart.line.uptrend.xyaxis"
         case .settings: "gearshape"
@@ -51,6 +52,7 @@ struct RootView: View {
         switch s {
         case .today: TodayView()
         case .calendar: CalendarView()
+        case .review: ReviewView()
         case .library: LibraryView()
         case .fitness: FitnessView()
         case .settings: SettingsView()

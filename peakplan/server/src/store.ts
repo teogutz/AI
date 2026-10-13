@@ -9,7 +9,7 @@ import {
   Workout,
   WorkoutInput,
 } from "./schema.js";
-import { activityTss, plannedMetrics } from "./metrics.js";
+import { activityTss, compareWorkout, complianceColor, plannedMetrics } from "./metrics.js";
 
 export class Store {
   private db: DatabaseSync;
@@ -174,6 +174,49 @@ export class Store {
       .prepare("SELECT json FROM activities WHERE start_date >= ? AND start_date < ? ORDER BY start_date")
       .all(opts.from ?? "0000", nextDay(opts.to) ?? "9999") as { json: string }[];
     return rows.map((r) => JSON.parse(r.json));
+  }
+
+  // ---------- review (planned vs. completed) ----------
+
+  /** Detailed planned-vs-actual comparison for one planned workout. */
+  comparison(workoutId: string) {
+    const w = this.getWorkout(workoutId);
+    if (!w) throw new NotFound(`Workout ${workoutId} not found`);
+    const a = w.completedActivityId ? this.getActivity(w.completedActivityId) : null;
+    return compareWorkout(w, a, this.getProfile());
+  }
+
+  /**
+   * Everything that happened (or should have) between two days: completed activities with their
+   * plan and compliance colour, missed workouts (past, still "planned") and skipped ones.
+   */
+  review(from: string, to: string) {
+    const today = new Date().toISOString().slice(0, 10);
+    const workouts = this.listWorkouts({ from, to });
+    const activities = this.listActivities({ from, to });
+    const byId = new Map(workouts.map((w) => [w.id, w]));
+    const items: any[] = [];
+
+    for (const a of activities) {
+      const w = a.workoutId ? (byId.get(a.workoutId) ?? this.getWorkout(a.workoutId)) : null;
+      const durationPct = w?.plannedDurationSec ? Math.round((a.durationSec / w.plannedDurationSec) * 100) : null;
+      const tssPct = w?.plannedTss && a.tss != null ? Math.round((a.tss / w.plannedTss) * 100) : null;
+      items.push({
+        date: localDay(a.startDate),
+        state: w ? "completed" : "unplanned",
+        color: w ? complianceColor(durationPct ?? tssPct) : null,
+        durationPct,
+        tssPct,
+        workout: w ?? null,
+        activity: a,
+      });
+    }
+    for (const w of workouts) {
+      if (w.completedActivityId) continue;
+      if (w.status === "skipped") items.push({ date: w.date, state: "skipped", color: "red", workout: w, activity: null });
+      else if (w.date! < today) items.push({ date: w.date, state: "missed", color: "red", workout: w, activity: null });
+    }
+    return items.sort((x, y) => y.date.localeCompare(x.date));
   }
 
   // ---------- analysis ----------

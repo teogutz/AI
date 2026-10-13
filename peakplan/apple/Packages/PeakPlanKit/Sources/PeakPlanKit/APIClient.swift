@@ -83,6 +83,20 @@ public struct APIClient: Sendable {
         try decode(await request("GET", "activities", query: ["from": from, "to": to]))
     }
 
+    public func review(from: String, to: String) async throws -> [ReviewItemDTO] {
+        try decode(await request("GET", "review", query: ["from": from, "to": to]))
+    }
+
+    public func comparison(workoutId: String) async throws -> ComparisonDTO {
+        try decode(await request("GET", "workouts/\(workoutId)/comparison"))
+    }
+
+    /// Updates RPE / notes, or links the activity to a different planned workout.
+    public func updateActivity(id: String, rpe: Double?, notes: String, workoutId: String?) async throws -> ActivityDTO {
+        struct Patch: Encodable { let rpe: Double?; let notes: String; let workoutId: String? }
+        return try decode(await request("PUT", "activities/\(id)", body: json(Patch(rpe: rpe, notes: notes, workoutId: workoutId))))
+    }
+
     @discardableResult
     public func upload(_ activities: [ActivityDTO]) async throws -> [ActivityDTO] {
         try decode(await request("POST", "activities", body: json(activities)))

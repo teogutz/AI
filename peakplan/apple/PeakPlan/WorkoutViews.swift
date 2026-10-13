@@ -125,7 +125,17 @@ struct WorkoutDetailView: View {
                 }
 
                 if let a = store.activity(id: w.completedActivityId) {
-                    SwiftUI.Section("Completed") { ActivitySummary(activity: a, planned: w) }
+                    SwiftUI.Section("Completed") {
+                        ActivitySummary(activity: a, planned: w)
+                        NavigationLink("Compare with plan, interval by interval") {
+                            ComparisonView(item: ReviewItemDTO(date: w.date ?? Day.today, state: .completed, workout: w, activity: a))
+                        }
+                    }
+                } else if let date = w.date, date < Day.today, w.status == .planned {
+                    SwiftUI.Section {
+                        Label("Missed: no completed workout synced for this day", systemImage: "exclamationmark.circle")
+                            .foregroundStyle(.red)
+                    }
                 }
 
                 SwiftUI.Section {

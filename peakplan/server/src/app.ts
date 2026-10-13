@@ -98,6 +98,15 @@ export function createApp(store: Store, token: string) {
     res.json(store.updateActivity(req.params.id, req.body));
   });
 
+  api.get("/review", (req, res) => {
+    const to = q(req.query.to) ?? new Date().toISOString().slice(0, 10);
+    const from = q(req.query.from) ?? to;
+    res.json(store.review(from, to));
+  });
+  api.get("/workouts/:id/comparison", (req, res) => {
+    res.json(store.comparison(req.params.id));
+  });
+
   api.get("/summary", (req, res) => {
     const to = q(req.query.to) ?? new Date().toISOString().slice(0, 10);
     const from = q(req.query.from) ?? to;

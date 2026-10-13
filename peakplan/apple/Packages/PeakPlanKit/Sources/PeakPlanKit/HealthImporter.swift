@@ -27,7 +27,9 @@ public final class HealthImporter {
         try await store.requestAuthorization(toShare: [], read: readTypes)
     }
 
-    public func recentActivities(days: Int = 30) async throws -> [ActivityDTO] {
+    /// Workouts from the last `days` days, skipping the HealthKit UUIDs in `excluding`
+    /// (already uploaded) so per-interval statistics are only computed once.
+    public func recentActivities(days: Int = 30, excluding: Set<String> = []) async throws -> [ActivityDTO] {
         let start = Calendar.current.date(byAdding: .day, value: -days, to: Date())!
         let predicate = HKQuery.predicateForSamples(withStart: start, end: nil)
         let descriptor = HKSampleQueryDescriptor(
@@ -35,7 +37,53 @@ public final class HealthImporter {
             sortDescriptors: [SortDescriptor(\.startDate, order: .reverse)],
             limit: 500
         )
-        return try await descriptor.result(for: store).map(activity(from:))
+        var result: [ActivityDTO] = []
+        for w in try await descriptor.result(for: store) where !excluding.contains(w.uuid.uuidString) {
+            var a = activity(from: w)
+            a.laps = await laps(for: w, sport: a.sport)
+            result.append(a)
+        }
+        return result
+    }
+
+    /// The Workout app records a segment event at every step of a structured workout; manual
+    /// laps are used as a fallback. Each becomes a lap with its own averages, so steps can be
+    /// compared with their targets.
+    private func laps(for w: HKWorkout, sport: Sport) async -> [LapDTO] {
+        let events = w.workoutEvents ?? []
+        var intervals = events.filter { $0.type == .segment }.map(\.dateInterval)
+        if intervals.isEmpty { intervals = events.filter { $0.type == .lap }.map(\.dateInterval) }
+        let distanceId: HKQuantityTypeIdentifier = switch sport {
+        case .bike: .distanceCycling
+        case .swim: .distanceSwimming
+        default: .distanceWalkingRunning
+        }
+        var laps: [LapDTO] = []
+        for interval in intervals.sorted(by: { $0.start < $1.start }) {
+            var lap = LapDTO(startOffsetSec: interval.start.timeIntervalSince(w.startDate), durationSec: interval.duration)
+            lap.avgHr = await statistic(.heartRate, unit: Self.bpm, interval, .discreteAverage)
+            lap.distanceM = await statistic(distanceId, unit: .meter(), interval, .cumulativeSum)
+            if sport == .bike {
+                lap.avgPower = await statistic(.cyclingPower, unit: .watt(), interval, .discreteAverage)
+                lap.avgCadence = await statistic(.cyclingCadence, unit: Self.bpm, interval, .discreteAverage)
+            } else if sport == .run {
+                lap.avgPower = await statistic(.runningPower, unit: .watt(), interval, .discreteAverage)
+            }
+            laps.append(lap)
+        }
+        return laps
+    }
+
+    private func statistic(_ id: HKQuantityTypeIdentifier, unit: HKUnit, _ interval: DateInterval,
+                           _ option: HKStatisticsOptions) async -> Double? {
+        let predicate = HKQuery.predicateForSamples(withStart: interval.start, end: interval.end, options: .strictStartDate)
+        let descriptor = HKStatisticsQueryDescriptor(
+            predicate: .quantitySample(type: HKQuantityType(id), predicate: predicate),
+            options: option
+        )
+        guard let stats = try? await descriptor.result(for: store) else { return nil }
+        let quantity = option.contains(.cumulativeSum) ? stats.sumQuantity() : stats.averageQuantity()
+        return quantity?.doubleValue(for: unit)
     }
 
     private func activity(from w: HKWorkout) -> ActivityDTO {

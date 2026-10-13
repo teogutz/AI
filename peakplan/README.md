@@ -67,7 +67,9 @@ The iPhone/Mac Settings screen shows the connector URL with a Copy button.
 | `get_athlete_profile` / `update_athlete_profile` | FTP, threshold pace, swim CSS, LTHR + HR zones, weight, goals, weekly hours |
 | `list_workouts` / `get_workout` | The plan (or the template library), with intervals as text and JSON |
 | `create_workout` / `update_workout` / `copy_workout` / `delete_workout` | Build, move, rewrite, skip or remove workouts |
-| `list_activities` / `add_activity_feedback` | Completed workouts from Apple Health; RPE and notes |
+| `list_activities` / `add_activity_feedback` | Completed workouts from Apple Health (with per-step laps); RPE and notes |
+| `review_completed_workouts` | Completed / missed / skipped / unplanned sessions with a compliance colour |
+| `compare_workout` | Planned vs. actual for one session, interval by interval against each target |
 | `get_training_summary` | Weekly planned vs. done (hours, TSS, compliance, by sport) and CTL/ATL/TSB |
 | prompt `weekly_review` | "Review my last 4 weeks and build next week" |
 
@@ -96,9 +98,31 @@ open PeakPlan.xcodeproj
 
 | Platform | What it does |
 |---|---|
-| **iPhone** | Today, Calendar (drag to move), Library, Fitness chart, editor. Every sync it **imports Health workouts → refreshes the plan → schedules the next 14 days on the Watch** (`WorkoutScheduler`; Apple allows 15 at a time) and sends the plan to the Watch app. A background refresh does this roughly hourly, so workouts Claude creates reach the Watch without opening the app. "Preview & send to Apple Watch" opens Apple's own preview sheet. |
+| **iPhone** | Today, Calendar (drag to move), **Review**, Library, Fitness chart, editor. Every sync it **imports Health workouts → refreshes the plan → schedules the next 14 days on the Watch** (`WorkoutScheduler`; Apple allows 15 at a time) and sends the plan to the Watch app. A background refresh does this roughly hourly, so workouts Claude creates reach the Watch without opening the app. "Preview & send to Apple Watch" opens Apple's own preview sheet. |
 | **Mac** | The same calendar and editor in a sidebar layout, with week grids and drag-and-drop between days and from the Library. ⌘R refreshes. Apple doesn't allow scheduling Watch workouts from a Mac, so Mac edits reach the Watch at the iPhone's next sync. |
 | **Apple Watch** | Shows today's and upcoming workouts with notes and steps. **Start** hands the workout to the Workout app (`openInWorkoutApp()`), which runs the intervals and saves the result to Health. Scheduled workouts also appear directly in the Workout app, as with TrainingPeaks. |
+
+## Reviewing completed workouts
+
+The **Review** tab (iPhone and Mac) lists every session from the last 1, 4 or 12 weeks, grouped by week with "x/y done · hours done of planned". Each session gets a TrainingPeaks-style colour:
+
+| Colour | Meaning |
+|---|---|
+| 🟢 Green | 80–120 % of planned duration (distance or TSS if duration is missing) |
+| 🟡 Yellow | 50–79 % or 121–150 % |
+| 🟠 Orange | Below 50 % or above 150 % |
+| 🔴 Red | Missed or skipped |
+| ⚪ Grey | Unplanned (no matching plan). You can link it to a planned workout that day. |
+
+Opening a session shows:
+
+* **Totals:** planned vs. completed duration, distance and TSS, with compliance %, plus average HR and power.
+* **Intervals:** the Workout app records a segment for each step, and PeakPlan imports each one with its average HR, power, cadence and distance. Every interval is checked against its target (✓ on target, ↓ too easy or slow, ↑ too hard or fast), and a chart shows the target bands with your actual averages.
+* **Feedback:** RPE (1–10) and notes. Claude reads these with `review_completed_workouts`, `compare_workout` and `list_activities`.
+
+Missed workouts can be marked skipped or moved to today from the same screen.
+
+Interval matching requires the number of segments the Watch recorded to equal the number of planned steps. That holds when you start the workout from PeakPlan or from the Workout app's scheduled list. Otherwise only totals are compared.
 
 ## Workout format
 
@@ -129,7 +153,7 @@ Workouts use one JSON format across the server, apps and Claude. It is defined i
 
 ## Status and known limitations
 
-* **The server is tested.** It has 8 tests covering REST, the MCP round trip, auth, matching activities to workouts, and CTL/ATL.
+* **The server is tested.** It has 9 tests covering REST, the MCP round trip, auth, matching activities to workouts, interval comparison, and CTL/ATL.
 * **The Swift code has not been compiled yet.** It was written in a Linux environment without Xcode. Expect a few small compile fixes on the first build. The likeliest spots are the WorkoutKit alert factory signatures in `WorkoutKitBridge.swift`.
 * **Watch interval support depends on the sport.** Apple's structured workouts cover running, cycling, walking, hiking, swimming and rowing. Strength and "other" workouts still sync to the calendar but can't be sent as intervals.
 * **This is a single-user app.** Access is one shared token. Use HTTPS and keep the token private, because the connector URL contains it.
