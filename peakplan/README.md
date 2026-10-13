@@ -92,7 +92,7 @@ open PeakPlan.xcodeproj
 ```
 
 1. In `project.yml`, set `DEVELOPMENT_TEAM` and replace `com.example.peakplan` (in the bundle IDs, `WKCompanionAppBundleIdentifier`, `BGTaskSchedulerPermittedIdentifiers` and `SyncCoordinator.refreshTaskID`) with your own prefix. Then run `xcodegen` again.
-2. Run **PeakPlan-iOS** on your iPhone. The Watch app installs with it. Run **PeakPlan-macOS** on the Mac.
+2. Run **PeakPlan-iOS** on your iPhone and **PeakPlan-macOS** on the Mac. Planned workouts reach the Watch's Workout app without any Watch app installed. To also install the PeakPlan Watch app (Start button and notes), uncomment `- target: PeakPlanWatch` under PeakPlan-iOS in `project.yml`, run `xcodegen` again, and make sure your Watch appears in Xcode's Devices and Simulators window.
 3. In Settings, enter the server URL and token. On iPhone, **Fill from Apple Health** pre-fills your profile:
    - **Read from Health:** FTP (estimated by the Watch from rides with a power meter), resting HR, weight, VO2max, and your max HR (the highest recorded in the last year, or estimated from your age).
    - **Estimated, marked "Estimate":** threshold HR, from max and resting HR, and threshold pace, from your fastest 20–70 min run in the last 4 months.

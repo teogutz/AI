@@ -26,7 +26,11 @@ targets:
     sources: [PeakPlan]
     dependencies:
       - package: PeakPlanKit
-      - target: PeakPlanWatch
+      # The Watch app is optional: planned workouts reach the Apple Watch's Workout app
+      # through WorkoutScheduler on the iPhone. To bundle the PeakPlan Watch app (Start
+      # button, notes), uncomment the next line, run xcodegen and make sure Xcode can
+      # see your Watch (Window → Devices and Simulators).
+      # - target: PeakPlanWatch
     entitlements:
       path: Config/PeakPlan-iOS.entitlements
       properties:
@@ -90,7 +94,7 @@ targets:
 schemes:
   PeakPlan-iOS:
     build:
-      targets: { PeakPlan-iOS: all, PeakPlanWatch: all }
+      targets: { PeakPlan-iOS: all }
     run: { config: Debug }
   PeakPlan-macOS:
     build:
