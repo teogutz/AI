@@ -1,4 +1,5 @@
 import SwiftUI
+import Observation
 import WorkoutKit
 import PeakPlanKit
 
@@ -30,6 +31,9 @@ final class WatchModel {
     }
 
     func loadScheduled() async {
+        if await WorkoutScheduler.shared.authorizationState != .authorized {
+            _ = await WorkoutScheduler.shared.requestAuthorization()
+        }
         scheduled = await WorkoutScheduler.shared.scheduledWorkouts
     }
 
