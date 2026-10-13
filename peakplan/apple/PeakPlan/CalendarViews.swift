@@ -12,7 +12,14 @@ struct TodayView: View {
                 if ws.isEmpty { Text("Rest day 🛌").foregroundStyle(.secondary) }
                 ForEach(ws) { w in
                     NavigationLink(value: w.id) { WorkoutRow(workout: w) }
-                    if !w.steps.isEmpty { IntensityChart(workout: w, profile: store.profile).frame(height: 70) }
+                    if w.hasIntensityProfile(store.profile) {
+                        IntensityStrip(workout: w, profile: store.profile)
+                            .frame(height: 32)
+                            .padding(.leading, 44) // line up with the title
+                    } else if !w.description.isEmpty {
+                        Text(w.description).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            .padding(.leading, 44)
+                    }
                 }
                 ForEach(store.activities(on: today)) { a in ActivitySummary(activity: a) }
             }

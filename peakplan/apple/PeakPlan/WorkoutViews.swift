@@ -27,25 +27,88 @@ extension WorkoutStatus {
     }
 }
 
-/// TrainingPeaks-style intensity profile: x = time, bar height = % of threshold.
+extension WorkoutDTO {
+    /// True when the workout has intervals worth drawing (several steps at different intensities).
+    /// Strength sessions or a single steady step would just draw a flat bar.
+    func hasIntensityProfile(_ profile: AthleteProfile) -> Bool {
+        guard sport != .strength else { return false }
+        let segs = WorkoutMetrics.segments(self, profile: profile)
+        return segs.count >= 2 && Set(segs.map { Int(($0.intensity * 20).rounded()) }).count >= 2
+    }
+}
+
+/// Compact TrainingPeaks-style workout shape for lists: bar width = time, height = intensity,
+/// colour = step type, dashed line = threshold. No axes, so it reads at a glance.
+struct IntensityStrip: View {
+    let workout: WorkoutDTO
+    let profile: AthleteProfile
+    private let ceiling = 1.2 // 120 % of threshold fills the height
+
+    var body: some View {
+        let segs = WorkoutMetrics.segments(workout, profile: profile)
+        let total = max(segs.reduce(0) { $0 + $1.duration }, 1)
+        GeometryReader { geo in
+            let gap: CGFloat = segs.count > 40 ? 0 : 1
+            let usable = geo.size.width - gap * CGFloat(max(segs.count - 1, 0))
+            ZStack(alignment: .bottomLeading) {
+                HStack(alignment: .bottom, spacing: gap) {
+                    ForEach(segs) { s in
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(s.kind.color.opacity(s.isOpen ? 0.45 : 0.9))
+                            .frame(width: max(usable * s.duration / total, 1),
+                                   height: geo.size.height * min(max(s.intensity, 0.15), ceiling) / ceiling)
+                    }
+                }
+                Path { p in
+                    let y = geo.size.height * (1 - 1 / ceiling)
+                    p.move(to: CGPoint(x: 0, y: y))
+                    p.addLine(to: CGPoint(x: geo.size.width, y: y))
+                }
+                .stroke(Color.secondary.opacity(0.6), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            }
+        }
+        .accessibilityLabel("Workout intensity profile")
+    }
+}
+
+/// Full intensity chart for the workout screen: x = minutes, y = % of threshold.
 struct IntensityChart: View {
     let workout: WorkoutDTO
     let profile: AthleteProfile
 
     var body: some View {
         let segs = WorkoutMetrics.segments(workout, profile: profile)
-        Chart(segs) { s in
-            RectangleMark(
-                xStart: .value("Start", s.start / 60),
-                xEnd: .value("End", (s.start + s.duration) / 60),
-                yStart: .value("Base", 0),
-                yEnd: .value("Intensity", s.intensity * 100)
-            )
-            .foregroundStyle(s.kind.color.opacity(s.isOpen ? 0.4 : 0.9))
+        let top = max(120, ((segs.map(\.intensity).max() ?? 1) * 100 / 20).rounded(.up) * 20)
+        Chart {
+            ForEach(segs) { s in
+                RectangleMark(
+                    xStart: .value("Start", s.start / 60),
+                    xEnd: .value("End", (s.start + s.duration) / 60),
+                    yStart: .value("Base", 0),
+                    yEnd: .value("Intensity", s.intensity * 100)
+                )
+                .foregroundStyle(s.kind.color.opacity(s.isOpen ? 0.4 : 0.9))
+            }
+            RuleMark(y: .value("Threshold", 100.0))
+                .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                .foregroundStyle(.secondary)
+                .annotation(position: .top, alignment: .trailing) {
+                    Text("threshold").font(.caption2).foregroundStyle(.secondary)
+                }
         }
-        .chartXAxisLabel("min")
-        .chartYAxisLabel("% threshold")
-        .chartYScale(domain: 0...max(120, (segs.map(\.intensity).max() ?? 1) * 100 + 5))
+        .chartYScale(domain: 0...top)
+        .chartYAxis {
+            AxisMarks(position: .leading, values: [0.0, 50.0, 100.0]) { value in
+                AxisGridLine()
+                AxisValueLabel { if let v = value.as(Double.self) { Text("\(Int(v))%") } }
+            }
+        }
+        .chartXAxis {
+            AxisMarks(values: .automatic(desiredCount: 5)) { value in
+                AxisGridLine()
+                AxisValueLabel { if let v = value.as(Double.self) { Text("\(Int(v))′") } }
+            }
+        }
     }
 }
 
@@ -98,8 +161,8 @@ struct WorkoutDetailView: View {
                         Metric(label: "TSS", value: w.plannedTss.map { "\(Int($0))" } ?? "–")
                         Metric(label: "Status", value: w.status.rawValue.capitalized)
                     }
-                    if !w.steps.isEmpty {
-                        IntensityChart(workout: w, profile: store.profile).frame(height: 140)
+                    if w.hasIntensityProfile(store.profile) {
+                        IntensityChart(workout: w, profile: store.profile).frame(height: 160)
                     }
                 }
 

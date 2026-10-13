@@ -51,7 +51,9 @@ struct WorkoutEditorView: View {
             SwiftUI.Section {
                 if !w.steps.isEmpty {
                     let est = WorkoutMetrics.estimate(w, profile: store.profile)
-                    IntensityChart(workout: w, profile: store.profile).frame(height: 120)
+                    if w.hasIntensityProfile(store.profile) {
+                        IntensityChart(workout: w, profile: store.profile).frame(height: 140)
+                    }
                     Text("≈ \(Fmt.duration(est.seconds)) · \(Int(est.tss)) TSS")
                         .font(.caption).foregroundStyle(.secondary)
                 }

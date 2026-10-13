@@ -327,9 +327,8 @@ struct ComparisonView: View {
                 Text(TodayView.pretty(item.date)).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            if let w = item.workout, !w.steps.isEmpty {
-                IntensityChart(workout: w, profile: store.profile).frame(width: 140, height: 50)
-                    .chartXAxis(.hidden).chartYAxis(.hidden)
+            if let w = item.workout, w.hasIntensityProfile(store.profile) {
+                IntensityStrip(workout: w, profile: store.profile).frame(width: 140, height: 36)
             }
         }
     }
