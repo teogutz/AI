@@ -1,7 +1,7 @@
 # Generate the Xcode project with:  brew install xcodegen && xcodegen
 name: PeakPlan
 options:
-  bundleIdPrefix: com.example.peakplan   # change to your own reverse-DNS prefix
+  bundleIdPrefix: com.teogutz.peakplan
   deploymentTarget:
     iOS: "17.0"
     macOS: "14.0"
@@ -48,10 +48,10 @@ targets:
         NSHealthShareUsageDescription: PeakPlan reads your completed workouts so your coach (Claude) can review them against the plan.
         NSHealthUpdateUsageDescription: PeakPlan schedules structured workouts on your Apple Watch.
         UIBackgroundModes: [fetch]
-        BGTaskSchedulerPermittedIdentifiers: [com.example.peakplan.refresh]
+        BGTaskSchedulerPermittedIdentifiers: [com.teogutz.peakplan.refresh]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.peakplan
+        PRODUCT_BUNDLE_IDENTIFIER: com.teogutz.peakplan
         TARGETED_DEVICE_FAMILY: "1,2"
 
   PeakPlan-macOS:
@@ -72,7 +72,7 @@ targets:
         LSApplicationCategoryType: public.app-category.healthcare-fitness
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.peakplan.mac
+        PRODUCT_BUNDLE_IDENTIFIER: com.teogutz.peakplan.mac
 
   PeakPlanWatch:
     type: application
@@ -85,11 +85,11 @@ targets:
       properties:
         CFBundleDisplayName: PeakPlan
         WKApplication: true
-        WKCompanionAppBundleIdentifier: com.example.peakplan
+        WKCompanionAppBundleIdentifier: com.teogutz.peakplan
         NSHealthShareUsageDescription: PeakPlan starts your planned workouts in the Workout app.
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.peakplan.watchkitapp
+        PRODUCT_BUNDLE_IDENTIFIER: com.teogutz.peakplan.watchkitapp
 
 schemes:
   PeakPlan-iOS:

@@ -66,7 +66,7 @@ enum SyncCoordinator {
     }
 
     #if os(iOS)
-    nonisolated static let refreshTaskID = "com.example.peakplan.refresh"
+    nonisolated static let refreshTaskID = "com.teogutz.peakplan.refresh"
 
     nonisolated static func scheduleBackgroundRefresh() {
         let request = BGAppRefreshTaskRequest(identifier: refreshTaskID)
