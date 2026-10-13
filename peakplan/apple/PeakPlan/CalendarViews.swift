@@ -144,7 +144,7 @@ struct DayCell: View {
                         Spacer(minLength: 0)
                     }
                     .padding(6)
-                    .background(.background.secondary, in: RoundedRectangle(cornerRadius: 6))
+                    .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
                 .draggable(w.id)

@@ -82,7 +82,7 @@ The iPhone/Mac Settings screen shows the connector URL with a Copy button.
 
 ## 3. Build the Apple apps
 
-You need Xcode 15.3 or later and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+You need Xcode 15.3 or later and [XcodeGen](https://github.com/yonaskolb/XcodeGen) 2.38 or later (older versions don't embed the Watch app).
 
 ```bash
 brew install xcodegen

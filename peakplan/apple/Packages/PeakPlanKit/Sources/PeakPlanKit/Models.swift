@@ -461,6 +461,21 @@ public struct AthleteProfile: Codable, Hashable, Sendable {
     public var weeklyHoursAvailable: Double?
 
     public init() {}
+
+    // Tolerant decoding so older caches / partial JSON don't fail.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? "Athlete"
+        ftpWatts = try c.decodeIfPresent(Double.self, forKey: .ftpWatts)
+        thresholdPaceSecPerKm = try c.decodeIfPresent(Double.self, forKey: .thresholdPaceSecPerKm)
+        swimCssSecPer100m = try c.decodeIfPresent(Double.self, forKey: .swimCssSecPer100m)
+        lthrBpm = try c.decodeIfPresent(Double.self, forKey: .lthrBpm)
+        maxHrBpm = try c.decodeIfPresent(Double.self, forKey: .maxHrBpm)
+        restingHrBpm = try c.decodeIfPresent(Double.self, forKey: .restingHrBpm)
+        weightKg = try c.decodeIfPresent(Double.self, forKey: .weightKg)
+        goals = try c.decodeIfPresent(String.self, forKey: .goals) ?? ""
+        weeklyHoursAvailable = try c.decodeIfPresent(Double.self, forKey: .weeklyHoursAvailable)
+    }
 }
 
 // MARK: - Calendar day helpers

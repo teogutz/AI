@@ -93,7 +93,7 @@ public struct WorkoutKitBridge {
     }
 
     private func workoutStep(_ s: WorkoutStepDTO, activity: HKWorkoutActivityType, location: HKWorkoutSessionLocationType) -> WorkoutStep {
-        var step = WorkoutStep()
+        var step = WorkoutStep(goal: .open)
         let stepGoal = goal(s.duration)
         if CustomWorkout.supportsGoal(stepGoal, activity: activity, location: location) { step.goal = stepGoal }
         if let alert = alert(s.target), CustomWorkout.supportsAlert(alert, activity: activity, location: location) {
