@@ -160,7 +160,45 @@ export function buildMcpServer(store: Store): McpServer {
     async ({ id }) => json(store.comparison(id)),
   );
 
+  server.registerTool(
+    "find_pairing_candidates",
+    {
+      title: "Find what a workout could be paired with",
+      description:
+        "Pass activityId to get planned workouts within ±3 days it could fulfil, or workoutId to get completed activities " +
+        "within ±3 days that could fulfil that plan. Best matches first (same sport, unpaired, closest day and duration).",
+      inputSchema: { activityId: z.string().optional(), workoutId: z.string().optional() },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ activityId, workoutId }) => {
+      if (activityId)
+        return json(store.workoutCandidates(activityId).map((c) => ({ ...c, workout: summarize(c.workout) })));
+      if (workoutId) return json(store.activityCandidates(workoutId));
+      return { ...json({ error: "pass activityId or workoutId" }), isError: true };
+    },
+  );
+
   // ----- writing -----
+
+  server.registerTool(
+    "pair_activity_with_workout",
+    {
+      title: "Pair a completed activity with a planned workout",
+      description:
+        "Use when a completed activity was not matched to its plan (done on another day, different sport recorded, or matched " +
+        "to the wrong plan). Undoes previous pairings on both sides. workoutId=null unpairs. By default a plan done on a " +
+        "different day is moved to the day it was actually done.",
+      inputSchema: {
+        activityId: z.string(),
+        workoutId: z.string().nullable(),
+        moveWorkoutToActivityDay: z.boolean().default(true),
+      },
+    },
+    async ({ activityId, workoutId, moveWorkoutToActivityDay }) => {
+      const r = store.linkActivity(activityId, workoutId, { moveWorkout: moveWorkoutToActivityDay });
+      return json({ activityId: r.activity.id, workout: r.workout ? summarize(r.workout) : null });
+    },
+  );
 
   server.registerTool(
     "create_workout",
@@ -242,7 +280,7 @@ export function buildMcpServer(store: Store): McpServer {
     "add_activity_feedback",
     {
       title: "Annotate completed activity",
-      description: "Record RPE / notes on a completed activity, or link it to a different planned workout.",
+      description: "Record RPE / notes on a completed activity (use pair_activity_with_workout to change which plan it fulfils).",
       inputSchema: {
         id: z.string(),
         rpe: z.number().min(1).max(10).optional(),

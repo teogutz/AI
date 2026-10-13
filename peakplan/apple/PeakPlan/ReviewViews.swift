@@ -118,7 +118,8 @@ struct ReviewRow: View {
         switch item.state {
         case .missed: return "\(day) · Missed"
         case .skipped: return "\(day) · Skipped"
-        case .unplanned: return "\(day) · Unplanned · \(Fmt.duration(item.activity?.durationSec))"
+        case .unplanned: return "\(day) · Unplanned · \(Fmt.duration(item.activity?.durationSec)) · tap to pair"
+        case .manual: return "\(day) · Marked done, no recorded workout"
         case .completed:
             let planned = Fmt.duration(item.workout?.plannedDurationSec)
             let actual = Fmt.duration(item.activity?.durationSec)
@@ -131,12 +132,18 @@ struct ReviewRow: View {
 /// Planned vs. completed for one session: totals, every interval against its target, and feedback.
 struct ComparisonView: View {
     @Environment(TrainingStore.self) private var store
-    let item: ReviewItemDTO
+    @State private var item: ReviewItemDTO
     @State private var comparison: ComparisonDTO?
     @State private var rpe: Double = 5
     @State private var hasRpe = false
     @State private var notes = ""
-    @State private var linkTo: String?
+    @State private var workoutCandidates: [WorkoutCandidateDTO] = []
+    @State private var activityCandidates: [ActivityCandidateDTO] = []
+    @State private var moveToActivityDay = true
+    @State private var confirmUnpair = false
+    @State private var pairing = false
+
+    init(item: ReviewItemDTO) { _item = State(initialValue: item) }
 
     var body: some View {
         List {
@@ -163,7 +170,9 @@ struct ComparisonView: View {
                 SwiftUI.Section("Completed") { ActivitySummary(activity: a) }
             }
 
-            if let w = item.workout, item.state == .missed || item.state == .skipped {
+            pairingSections
+
+            if let w = item.workout, item.state == .missed || item.state == .skipped || item.state == .manual {
                 SwiftUI.Section {
                     NavigationLink("Open planned workout", value: w.id)
                     if item.state == .missed {
@@ -174,21 +183,6 @@ struct ComparisonView: View {
             }
 
             if let a = item.activity {
-                if item.state == .unplanned {
-                    let candidates = store.workouts(on: item.date).filter { $0.completedActivityId == nil }
-                    if !candidates.isEmpty {
-                        SwiftUI.Section("Link to planned workout") {
-                            Picker("Planned workout", selection: $linkTo) {
-                                Text("None").tag(String?.none)
-                                ForEach(candidates) { Text($0.title).tag(String?.some($0.id)) }
-                            }
-                            Button("Link") {
-                                Task { await store.updateActivity(a, rpe: hasRpe ? rpe : nil, notes: notes, workoutId: linkTo) }
-                            }
-                            .disabled(linkTo == nil)
-                        }
-                    }
-                }
                 SwiftUI.Section("How did it feel?") {
                     Toggle("Rate effort (RPE)", isOn: $hasRpe)
                     if hasRpe {
@@ -203,11 +197,125 @@ struct ComparisonView: View {
             }
         }
         .navigationTitle(item.workout?.title ?? item.activity?.title ?? "Review")
-        .task {
-            if let r = item.activity?.rpe { rpe = r; hasRpe = true }
-            notes = item.activity?.notes ?? ""
-            guard let w = item.workout, let api = store.client else { return }
+        .task { await load() }
+        .confirmationDialog("Unpair this workout from its plan?", isPresented: $confirmUnpair, titleVisibility: .visible) {
+            Button("Unpair", role: .destructive) { Task { await pair(workoutId: nil) } }
+        } message: {
+            Text("The plan goes back to planned and this workout becomes unplanned. Automatic matching won't pair them again.")
+        }
+    }
+
+    private func load() async {
+        if let r = item.activity?.rpe { rpe = r; hasRpe = true }
+        notes = item.activity?.notes ?? ""
+        guard let api = store.client else { return }
+        comparison = nil
+        workoutCandidates = []
+        activityCandidates = []
+        if let w = item.workout, item.activity != nil {
             comparison = try? await api.comparison(workoutId: w.id)
+        }
+        if item.state == .unplanned, let id = item.activity?.id {
+            workoutCandidates = (try? await api.workoutCandidates(activityId: id)) ?? []
+        }
+        if let w = item.workout, item.activity == nil {
+            activityCandidates = (try? await api.activityCandidates(workoutId: w.id)) ?? []
+        }
+    }
+
+    // MARK: Pairing
+
+    /// Pair this item's activity with `workoutId` (nil = unpair) and show the result in place.
+    private func pair(workoutId: String?, activity: ActivityDTO? = nil) async {
+        guard let api = store.client, let a = activity ?? item.activity, let activityId = a.id else { return }
+        pairing = true
+        defer { pairing = false }
+        do {
+            let r = try await api.link(activityId: activityId, workoutId: workoutId, moveWorkout: moveToActivityDay)
+            let day = String(r.activity.startDate.prefix(10))
+            item = r.workout.map { ReviewItemDTO(date: day, state: .completed, workout: $0, activity: r.activity) }
+                ?? ReviewItemDTO(date: day, state: .unplanned, activity: r.activity)
+            await load()
+            Task { await store.refresh() }
+        } catch {
+            store.lastError = error.localizedDescription
+        }
+    }
+
+    @ViewBuilder
+    private var pairingSections: some View {
+        if item.state == .unplanned, let a = item.activity {
+            SwiftUI.Section {
+                if workoutCandidates.isEmpty {
+                    Text("No planned workouts within 3 days of this one.").foregroundStyle(.secondary)
+                }
+                ForEach(workoutCandidates) { c in
+                    Button { Task { await pair(workoutId: c.workout.id) } } label: {
+                        CandidateRow(
+                            symbol: c.workout.sport.symbol,
+                            title: c.workout.title,
+                            detail: Self.offsetText(c.dayOffset, planned: true) + " · " + Fmt.duration(c.workout.plannedDurationSec),
+                            warnings: [c.sameSport ? nil : "Different sport (\(c.workout.sport.displayName))",
+                                       c.pairedActivityId != nil ? "Already paired. Pairing replaces it." : nil].compactMap { $0 }
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(pairing)
+                }
+                if workoutCandidates.contains(where: { $0.dayOffset != 0 }) {
+                    Toggle("Move the plan to \(TodayView.pretty(String(a.startDate.prefix(10))))", isOn: $moveToActivityDay)
+                }
+            } header: {
+                Text("Pair with a planned workout")
+            } footer: {
+                Text("Pick the plan this workout was meant to be. It will be compared against it and count as done.")
+            }
+        }
+
+        if item.activity == nil, let w = item.workout, item.state != .skipped || !activityCandidates.isEmpty {
+            SwiftUI.Section {
+                if activityCandidates.isEmpty {
+                    Text("No recorded workouts within 3 days of \(TodayView.pretty(w.date ?? item.date)).").foregroundStyle(.secondary)
+                }
+                ForEach(activityCandidates) { c in
+                    Button { Task { await pair(workoutId: w.id, activity: c.activity) } } label: {
+                        CandidateRow(
+                            symbol: c.activity.sport.symbol,
+                            title: c.activity.title,
+                            detail: Self.offsetText(c.dayOffset, planned: false) + " · " + Fmt.duration(c.activity.durationSec)
+                                + (c.activity.distanceM.map { " · " + Fmt.distance($0) } ?? ""),
+                            warnings: [c.sameSport ? nil : "Different sport (\(c.activity.sport.displayName))",
+                                       c.pairedWorkoutId != nil ? "Paired with another plan. Pairing moves it here." : nil].compactMap { $0 }
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(pairing)
+                }
+                if activityCandidates.contains(where: { $0.dayOffset != 0 }) {
+                    Toggle("Move the plan to the day it was done", isOn: $moveToActivityDay)
+                }
+            } header: {
+                Text("Pair with a recorded workout")
+            } footer: {
+                Text("Did this plan on another day, or the Watch recorded it as a different sport? Pick the recorded workout.")
+            }
+        }
+
+        if item.state == .completed, item.activity != nil {
+            SwiftUI.Section {
+                Button("Unpair from this plan", role: .destructive) { confirmUnpair = true }
+                    .disabled(pairing)
+            } footer: {
+                Text("Use this if the workout was matched to the wrong plan. You can then pair it with the right one.")
+            }
+        }
+    }
+
+    static func offsetText(_ offset: Int, planned: Bool) -> String {
+        switch offset {
+        case 0: return "Same day"
+        case let d where d < 0: return planned ? "Planned \(-d) day\(d == -1 ? "" : "s") earlier" : "Done \(-d) day\(d == -1 ? "" : "s") earlier"
+        default: return planned ? "Planned \(offset) day\(offset == 1 ? "" : "s") later" : "Done \(offset) day\(offset == 1 ? "" : "s") later"
         }
     }
 
@@ -354,5 +462,26 @@ struct TargetChart: View {
             .chartXAxisLabel("Step")
             .frame(height: 180)
         }
+    }
+}
+
+struct CandidateRow: View {
+    let symbol: String
+    let title: String
+    let detail: String
+    let warnings: [String]
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol).frame(width: 28).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.headline)
+                Text(detail).font(.caption).foregroundStyle(.secondary)
+                ForEach(warnings, id: \.self) { Text($0).font(.caption2).foregroundStyle(.orange) }
+            }
+            Spacer()
+            Text("Pair").font(.subheadline.bold()).foregroundStyle(Color.accentColor)
+        }
+        .contentShape(Rectangle())
     }
 }

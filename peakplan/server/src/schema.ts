@@ -130,6 +130,8 @@ export type ActivityInput = z.infer<typeof ActivityInput>;
 
 export interface Activity extends ActivityInput {
   id: string;
+  /** Set once the athlete pairs/unpairs by hand; automatic matching then leaves it alone. */
+  manualLink?: boolean;
   tss: number | null;
   createdAt: string;
 }

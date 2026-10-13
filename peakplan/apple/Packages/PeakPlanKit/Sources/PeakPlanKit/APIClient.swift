@@ -97,6 +97,31 @@ public struct APIClient: Sendable {
         return try decode(await request("PUT", "activities/\(id)", body: json(Patch(rpe: rpe, notes: notes, workoutId: workoutId))))
     }
 
+    /// Pairs an activity with a planned workout (nil unpairs). moveWorkout moves the plan to the
+    /// day the activity was done.
+    public func link(activityId: String, workoutId: String?, moveWorkout: Bool) async throws -> LinkResultDTO {
+        struct Body: Encodable {
+            let workoutId: String?
+            let moveWorkout: Bool
+            func encode(to encoder: Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(workoutId, forKey: .workoutId) // explicit null = unpair
+                try c.encode(moveWorkout, forKey: .moveWorkout)
+            }
+            enum CodingKeys: String, CodingKey { case workoutId, moveWorkout }
+        }
+        return try decode(await request("POST", "activities/\(activityId)/link",
+                                        body: json(Body(workoutId: workoutId, moveWorkout: moveWorkout))))
+    }
+
+    public func workoutCandidates(activityId: String) async throws -> [WorkoutCandidateDTO] {
+        try decode(await request("GET", "activities/\(activityId)/candidates"))
+    }
+
+    public func activityCandidates(workoutId: String) async throws -> [ActivityCandidateDTO] {
+        try decode(await request("GET", "workouts/\(workoutId)/candidates"))
+    }
+
     @discardableResult
     public func upload(_ activities: [ActivityDTO]) async throws -> [ActivityDTO] {
         try decode(await request("POST", "activities", body: json(activities)))

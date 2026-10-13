@@ -94,6 +94,16 @@ export function createApp(store: Store, token: string) {
     const items = Array.isArray(req.body) ? req.body : [req.body];
     res.json(items.map((a) => store.upsertActivity(a)));
   });
+  api.post("/activities/:id/link", (req, res) => {
+    const workoutId = typeof req.body?.workoutId === "string" ? req.body.workoutId : null;
+    res.json(store.linkActivity(req.params.id, workoutId, { moveWorkout: req.body?.moveWorkout !== false }));
+  });
+  api.get("/activities/:id/candidates", (req, res) => {
+    res.json(store.workoutCandidates(req.params.id));
+  });
+  api.get("/workouts/:id/candidates", (req, res) => {
+    res.json(store.activityCandidates(req.params.id));
+  });
   api.put("/activities/:id", (req, res) => {
     res.json(store.updateActivity(req.params.id, req.body));
   });

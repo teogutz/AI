@@ -184,3 +184,41 @@ test("review & interval comparison", () => {
   assert.equal(review.find((r) => r.workout?.id === missed.id)?.state, "missed");
   assert.equal(review.find((r) => r.workout?.id === w.id)?.state, "completed");
 });
+
+test("pairing: plan added after import, cross-day manual pairing, unpairing", () => {
+  const store = new Store(":memory:");
+  // Activity first, plan created later on the same day -> auto-paired.
+  const run = store.upsertActivity({ externalId: "r1", sport: "run", startDate: "2026-10-12T14:54:00-06:00", durationSec: 2980 });
+  assert.equal(run.workoutId, null);
+  const easy = store.createWorkout({ title: "Easy Run", sport: "run", date: "2026-10-12", steps: [] });
+  assert.equal(easy.completedActivityId, run.id);
+
+  // Plan for Tuesday, done on Wednesday -> not auto-paired, manual pairing moves the plan.
+  const tue = store.createWorkout({ title: "Tempo", sport: "run", date: "2026-10-13", steps: [] });
+  const wed = store.upsertActivity({ externalId: "r2", sport: "run", startDate: "2026-10-14T07:00:00-06:00", durationSec: 3000 });
+  assert.equal(wed.workoutId, null);
+  const cands = store.workoutCandidates(wed.id);
+  assert.equal(cands[0].workout.id, tue.id);
+  assert.equal(cands[0].dayOffset, -1);
+  const { workout } = store.linkActivity(wed.id, tue.id);
+  assert.equal(workout?.date, "2026-10-14");
+  assert.equal(workout?.status, "completed");
+
+  // Re-import keeps the manual pairing and feedback.
+  store.updateActivity(wed.id, { rpe: 7, notes: "legs heavy" });
+  const again = store.upsertActivity({ externalId: "r2", sport: "run", startDate: "2026-10-14T07:00:00-06:00", durationSec: 3000 });
+  assert.equal(again.workoutId, tue.id);
+  assert.equal(again.rpe, 7);
+  assert.equal(again.notes, "legs heavy");
+
+  // Unpair -> plan back to planned, and auto-matching won't re-pair it.
+  store.linkActivity(wed.id, null);
+  assert.equal(store.getWorkout(tue.id)?.status, "planned");
+  store.backfillMatches();
+  assert.equal(store.getActivity(wed.id)?.workoutId, null);
+
+  // Pairing a plan that already has an activity releases the old one.
+  store.linkActivity(wed.id, easy.id, { moveWorkout: false });
+  assert.equal(store.getActivity(run.id)?.workoutId, null);
+  assert.equal(store.getWorkout(easy.id)?.completedActivityId, wed.id);
+});

@@ -64,11 +64,27 @@ public final class HealthImporter {
         case .swim: .distanceSwimming
         default: .distanceWalkingRunning
         }
+        let chains = Self.chains(intervals)
+        guard !chains.isEmpty else { return [] }
+
+        // Measure each series' distances, then keep the one that describes the workout's steps.
+        var measured: [[LapDTO]] = []
+        for chain in chains {
+            var laps: [LapDTO] = []
+            for interval in chain {
+                var lap = LapDTO(startOffsetSec: interval.start.timeIntervalSince(w.startDate), durationSec: interval.duration)
+                lap.distanceM = await statistic(distanceId, unit: .meter(), interval, .cumulativeSum)
+                laps.append(lap)
+            }
+            measured.append(laps)
+        }
+        let best = Self.pickStepSeries(measured)
+
         var laps: [LapDTO] = []
-        for interval in intervals.sorted(by: { $0.start < $1.start }) {
-            var lap = LapDTO(startOffsetSec: interval.start.timeIntervalSince(w.startDate), durationSec: interval.duration)
+        for var lap in best {
+            let start = w.startDate.addingTimeInterval(lap.startOffsetSec)
+            let interval = DateInterval(start: start, duration: lap.durationSec)
             lap.avgHr = await statistic(.heartRate, unit: Self.bpm, interval, .discreteAverage)
-            lap.distanceM = await statistic(distanceId, unit: .meter(), interval, .cumulativeSum)
             if sport == .bike {
                 lap.avgPower = await statistic(.cyclingPower, unit: .watt(), interval, .discreteAverage)
                 lap.avgCadence = await statistic(.cyclingCadence, unit: Self.bpm, interval, .discreteAverage)
@@ -78,6 +94,33 @@ public final class HealthImporter {
             laps.append(lap)
         }
         return laps
+    }
+
+    /// The Watch records several overlapping series at once (auto km splits, auto mile splits and,
+    /// for structured workouts, one segment per step). Split them into non-overlapping series.
+    static func chains(_ intervals: [DateInterval]) -> [[DateInterval]] {
+        var chains: [[DateInterval]] = []
+        for i in intervals.sorted(by: { ($0.start, $0.duration) < ($1.start, $1.duration) }) {
+            if let idx = chains.firstIndex(where: { $0.last!.end <= i.start.addingTimeInterval(1) }) {
+                chains[idx].append(i)
+            } else {
+                chains.append([i])
+            }
+        }
+        return chains
+    }
+
+    /// Prefers a series that isn't automatic distance splits (i.e. the workout's own steps);
+    /// otherwise the kilometre splits.
+    static func pickStepSeries(_ series: [[LapDTO]]) -> [LapDTO] {
+        func isAutoSplit(_ laps: [LapDTO], meters: Double) -> Bool {
+            let full = laps.dropLast().compactMap(\.distanceM)
+            guard full.count >= 2 else { return false }
+            return Double(full.filter { abs($0 - meters) / meters < 0.03 }.count) / Double(full.count) >= 0.7
+        }
+        let auto = series.map { isAutoSplit($0, meters: 1000) || isAutoSplit($0, meters: 1609.34) }
+        if let steps = series.indices.first(where: { !auto[$0] }) { return series[steps] }
+        return series.first(where: { isAutoSplit($0, meters: 1000) }) ?? series[0]
     }
 
     private func statistic(_ id: HKQuantityTypeIdentifier, unit: HKUnit, _ interval: DateInterval,

@@ -76,7 +76,7 @@ export class Store {
   createWorkout(input: unknown, id?: string): Workout {
     const parsed = WorkoutInput.parse(input);
     const now = new Date().toISOString();
-    return this.saveWorkout({
+    const created = this.saveWorkout({
       ...parsed,
       id: id ?? randomUUID(),
       plannedDurationSec: null,
@@ -86,6 +86,9 @@ export class Store {
       createdAt: now,
       updatedAt: now,
     });
+    // A plan added after the activity was already imported (e.g. planned retroactively).
+    if (created.date) this.autoMatch(created.date);
+    return this.getWorkout(created.id)!;
   }
 
   getWorkout(id: string): Workout | null {
@@ -98,10 +101,17 @@ export class Store {
     const existing = this.getWorkout(id);
     if (!existing) throw new NotFound(`Workout ${id} not found`);
     const merged = WorkoutInput.parse({ ...existing, ...patch });
-    return this.saveWorkout({ ...existing, ...merged });
+    const saved = this.saveWorkout({ ...existing, ...merged });
+    if (saved.date && saved.date !== existing.date) this.autoMatch(saved.date);
+    return this.getWorkout(id)!;
   }
 
   deleteWorkout(id: string): boolean {
+    const w = this.getWorkout(id);
+    if (w?.completedActivityId) {
+      const a = this.getActivity(w.completedActivityId);
+      if (a && a.workoutId === id) this.writeActivity({ ...a, workoutId: null });
+    }
     return Number(this.db.prepare("DELETE FROM workouts WHERE id = ?").run(id).changes) > 0;
   }
 
@@ -119,7 +129,16 @@ export class Store {
 
   // ---------- activities ----------
 
-  /** Insert or update by externalId; links to a planned workout on the same day + sport. */
+  private writeActivity(a: Activity) {
+    this.db
+      .prepare(
+        `INSERT INTO activities (id, external_id, start_date, json) VALUES (?, ?, ?, ?)
+         ON CONFLICT(external_id) DO UPDATE SET start_date = excluded.start_date, json = excluded.json`,
+      )
+      .run(a.id, a.externalId, a.startDate, JSON.stringify(a));
+  }
+
+  /** Insert or update by externalId, then try to pair it with a planned workout. */
   upsertActivity(input: unknown): Activity {
     const parsed = ActivityInput.parse(input);
     const profile = this.getProfile();
@@ -128,34 +147,26 @@ export class Store {
       .get(parsed.externalId) as { json: string } | undefined;
     const prev: Activity | null = existing ? JSON.parse(existing.json) : null;
 
-    let workoutId = parsed.workoutId ?? prev?.workoutId ?? null;
-    if (!workoutId) {
-      const day = localDay(parsed.startDate);
-      const match = this.listWorkouts({ from: day, to: day }).find(
-        (w) => w.sport === parsed.sport && !w.completedActivityId,
-      );
-      workoutId = match?.id ?? null;
-    }
-
     const activity: Activity = {
       ...parsed,
-      workoutId,
+      // Re-imports must not wipe the athlete's feedback or a manual pairing.
+      rpe: parsed.rpe ?? prev?.rpe ?? null,
+      notes: parsed.notes || prev?.notes || "",
+      workoutId: prev?.manualLink ? (prev.workoutId ?? null) : (parsed.workoutId ?? prev?.workoutId ?? null),
+      manualLink: prev?.manualLink ?? false,
       id: prev?.id ?? randomUUID(),
       tss: activityTss(parsed, profile),
       createdAt: prev?.createdAt ?? new Date().toISOString(),
     };
-    this.db
-      .prepare(
-        `INSERT INTO activities (id, external_id, start_date, json) VALUES (?, ?, ?, ?)
-         ON CONFLICT(external_id) DO UPDATE SET start_date = excluded.start_date, json = excluded.json`,
-      )
-      .run(activity.id, activity.externalId, activity.startDate, JSON.stringify(activity));
+    this.writeActivity(activity);
 
-    if (workoutId) {
-      const w = this.getWorkout(workoutId);
+    if (activity.workoutId) {
+      const w = this.getWorkout(activity.workoutId);
       if (w) this.saveWorkout({ ...w, status: "completed", completedActivityId: activity.id });
+    } else {
+      this.autoMatch(localDay(activity.startDate));
     }
-    return activity;
+    return this.getActivity(activity.id)!;
   }
 
   getActivity(id: string): Activity | null {
@@ -166,7 +177,120 @@ export class Store {
   updateActivity(id: string, patch: { rpe?: number | null; notes?: string; workoutId?: string | null }): Activity {
     const a = this.getActivity(id);
     if (!a) throw new NotFound(`Activity ${id} not found`);
-    return this.upsertActivity({ ...a, ...patch });
+    const { workoutId, ...feedback } = patch;
+    this.writeActivity({ ...a, ...feedback });
+    if (workoutId !== undefined && workoutId !== a.workoutId) return this.linkActivity(id, workoutId).activity;
+    return this.getActivity(id)!;
+  }
+
+  // ---------- pairing completed activities with planned workouts ----------
+
+  /**
+   * Automatic pairing for one day: each unpaired activity goes to an unpaired planned workout of
+   * the same sport that day, preferring the closest planned duration. Activities the athlete
+   * paired or unpaired by hand are left alone.
+   */
+  autoMatch(day: string) {
+    const free = this.listActivities({ from: day, to: day }).filter((a) => !a.workoutId && !a.manualLink);
+    for (const a of free) {
+      const candidates = this.listWorkouts({ from: day, to: day }).filter(
+        (w) => w.sport === a.sport && !w.completedActivityId && w.status !== "skipped",
+      );
+      if (candidates.length === 0) continue;
+      candidates.sort(
+        (x, y) => Math.abs((x.plannedDurationSec ?? 0) - a.durationSec) - Math.abs((y.plannedDurationSec ?? 0) - a.durationSec),
+      );
+      this.pair(a, candidates[0], false);
+    }
+  }
+
+  /** Re-run automatic pairing over all history (cheap; used at startup). */
+  backfillMatches() {
+    const days = new Set(this.listActivities().filter((a) => !a.workoutId && !a.manualLink).map((a) => localDay(a.startDate)));
+    for (const d of days) this.autoMatch(d);
+  }
+
+  private pair(a: Activity, w: Workout, manual: boolean) {
+    this.writeActivity({ ...a, workoutId: w.id, manualLink: manual || a.manualLink });
+    this.saveWorkout({ ...w, status: "completed", completedActivityId: a.id });
+  }
+
+  /**
+   * Manually pair an activity with a planned workout (or unpair with workoutId = null).
+   * Undoes any previous pairing on either side. With moveWorkout, a plan done on another day is
+   * moved to the day it was actually done, as TrainingPeaks does.
+   */
+  linkActivity(activityId: string, workoutId: string | null, opts: { moveWorkout?: boolean } = {}) {
+    const a = this.getActivity(activityId);
+    if (!a) throw new NotFound(`Activity ${activityId} not found`);
+
+    // Release the activity's current plan.
+    if (a.workoutId) {
+      const old = this.getWorkout(a.workoutId);
+      if (old && old.completedActivityId === a.id) this.saveWorkout({ ...old, status: "planned", completedActivityId: null });
+    }
+
+    if (workoutId === null) {
+      this.writeActivity({ ...a, workoutId: null, manualLink: true });
+      return { activity: this.getActivity(activityId)!, workout: null };
+    }
+
+    let w = this.getWorkout(workoutId);
+    if (!w) throw new NotFound(`Workout ${workoutId} not found`);
+    // Release the plan's current activity.
+    if (w.completedActivityId && w.completedActivityId !== a.id) {
+      const other = this.getActivity(w.completedActivityId);
+      if (other) this.writeActivity({ ...other, workoutId: null, manualLink: true });
+    }
+    const day = localDay(a.startDate);
+    if ((opts.moveWorkout ?? true) && w.date !== day) w = { ...w, date: day };
+    this.pair({ ...a, workoutId: null }, w, true);
+    return { activity: this.getActivity(activityId)!, workout: this.getWorkout(workoutId)! };
+  }
+
+  /** Planned workouts within ±3 days that this activity could be paired with, best first. */
+  workoutCandidates(activityId: string) {
+    const a = this.getActivity(activityId);
+    if (!a) throw new NotFound(`Activity ${activityId} not found`);
+    const day = localDay(a.startDate);
+    return this.listWorkouts({ from: addDays(day, -3), to: addDays(day, 3) })
+      .filter((w) => w.id !== a.workoutId)
+      .map((w) => ({
+        workout: w,
+        dayOffset: dayDiff(day, w.date!),
+        sameSport: w.sport === a.sport,
+        pairedActivityId: w.completedActivityId,
+      }))
+      .sort(
+        (x, y) =>
+          Number(y.sameSport) - Number(x.sameSport) ||
+          Number(!!x.pairedActivityId) - Number(!!y.pairedActivityId) ||
+          Math.abs(x.dayOffset) - Math.abs(y.dayOffset) ||
+          Math.abs((x.workout.plannedDurationSec ?? 0) - a.durationSec) -
+            Math.abs((y.workout.plannedDurationSec ?? 0) - a.durationSec),
+      );
+  }
+
+  /** Completed activities within ±3 days that could fulfil this planned workout, best first. */
+  activityCandidates(workoutId: string) {
+    const w = this.getWorkout(workoutId);
+    if (!w || !w.date) throw new NotFound(`Workout ${workoutId} not found or not scheduled`);
+    return this.listActivities({ from: addDays(w.date, -3), to: addDays(w.date, 3) })
+      .filter((a) => a.id !== w.completedActivityId)
+      .map((a) => ({
+        activity: a,
+        dayOffset: dayDiff(w.date!, localDay(a.startDate)),
+        sameSport: a.sport === w.sport,
+        pairedWorkoutId: a.workoutId ?? null,
+      }))
+      .sort(
+        (x, y) =>
+          Number(y.sameSport) - Number(x.sameSport) ||
+          Number(!!x.pairedWorkoutId) - Number(!!y.pairedWorkoutId) ||
+          Math.abs(x.dayOffset) - Math.abs(y.dayOffset) ||
+          Math.abs(x.activity.durationSec - (w.plannedDurationSec ?? 0)) -
+            Math.abs(y.activity.durationSec - (w.plannedDurationSec ?? 0)),
+      );
   }
 
   listActivities(opts: { from?: string; to?: string } = {}): Activity[] {
@@ -214,6 +338,7 @@ export class Store {
     for (const w of workouts) {
       if (w.completedActivityId) continue;
       if (w.status === "skipped") items.push({ date: w.date, state: "skipped", color: "red", workout: w, activity: null });
+      else if (w.status === "completed") items.push({ date: w.date, state: "manual", color: null, workout: w, activity: null });
       else if (w.date! < today) items.push({ date: w.date, state: "missed", color: "red", workout: w, activity: null });
     }
     return items.sort((x, y) => y.date.localeCompare(x.date));
@@ -308,6 +433,17 @@ function nextDay(d?: string): string | undefined {
   const t = new Date(d + "T00:00:00Z");
   t.setUTCDate(t.getUTCDate() + 1);
   return t.toISOString().slice(0, 10);
+}
+
+function addDays(d: string, n: number): string {
+  const t = new Date(d + "T00:00:00Z");
+  t.setUTCDate(t.getUTCDate() + n);
+  return t.toISOString().slice(0, 10);
+}
+
+/** Whole days from `from` to `to` (positive = later). */
+function dayDiff(from: string, to: string): number {
+  return Math.round((Date.parse(to + "T00:00:00Z") - Date.parse(from + "T00:00:00Z")) / 86_400_000);
 }
 
 function weekStart(d: string): string {

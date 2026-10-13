@@ -125,6 +125,14 @@ Opening a session shows:
 
 Missed workouts can be marked skipped or moved to today from the same screen.
 
+**Pairing.** A recorded workout is paired automatically with a plan on the same day and the same sport. This also happens when the plan is created after the workout was recorded. When automatic pairing misses one, for example because the plan was done on another day, the Watch recorded a different sport, or it was paired with the wrong plan, you can fix it by hand:
+
+* **Unplanned workout:** open it from Review, or tap the orange item on the calendar. It lists plans within ±3 days, best match first. Tap **Pair**; by default the plan moves to the day you actually did it.
+* **Missed plan:** it lists recorded workouts within ±3 days.
+* **Wrong pairing:** **Unpair** it, then pair it with the right plan. Automatic pairing never overrides a pairing you made by hand.
+
+Claude can do the same with `find_pairing_candidates` and `pair_activity_with_workout`.
+
 Interval matching requires the number of segments the Watch recorded to equal the number of planned steps. That holds when you start the workout from PeakPlan or from the Workout app's scheduled list. Otherwise only totals are compared.
 
 ## Workout format

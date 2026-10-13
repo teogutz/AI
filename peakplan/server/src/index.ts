@@ -8,6 +8,7 @@ if (!token || token.length < 16) {
 }
 const port = Number(process.env.PORT ?? 8787);
 const store = new Store(process.env.PEAKPLAN_DB ?? "./data/peakplan.db");
+store.backfillMatches(); // pair activities with plans that were added after the activity was imported
 
 createApp(store, token).listen(port, () => {
   console.log(`PeakPlan server on :${port}`);

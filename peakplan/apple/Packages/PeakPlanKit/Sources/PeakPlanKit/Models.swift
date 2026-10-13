@@ -368,7 +368,8 @@ public struct LapDTO: Codable, Hashable, Sendable {
 public enum ComplianceColor: String, Codable, Sendable { case green, yellow, orange, red }
 
 public struct ReviewItemDTO: Codable, Hashable, Identifiable, Sendable {
-    public enum State: String, Codable, Sendable { case completed, unplanned, missed, skipped }
+    /// manual = marked completed by hand, with no recorded activity paired to it.
+    public enum State: String, Codable, Sendable { case completed, unplanned, missed, skipped, manual }
     public var date: String
     public var state: State
     public var color: ComplianceColor?
@@ -389,6 +390,31 @@ public struct ReviewItemDTO: Codable, Hashable, Identifiable, Sendable {
         self.workout = workout
         self.activity = activity
     }
+}
+
+// MARK: - Pairing completed activities with planned workouts
+
+/// A planned workout an activity could be paired with. dayOffset = plan day − activity day.
+public struct WorkoutCandidateDTO: Codable, Hashable, Identifiable, Sendable {
+    public var workout: WorkoutDTO
+    public var dayOffset: Int
+    public var sameSport: Bool
+    public var pairedActivityId: String?
+    public var id: String { workout.id }
+}
+
+/// A completed activity that could fulfil a plan. dayOffset = activity day − plan day.
+public struct ActivityCandidateDTO: Codable, Hashable, Identifiable, Sendable {
+    public var activity: ActivityDTO
+    public var dayOffset: Int
+    public var sameSport: Bool
+    public var pairedWorkoutId: String?
+    public var id: String { activity.id ?? activity.externalId }
+}
+
+public struct LinkResultDTO: Codable, Sendable {
+    public var activity: ActivityDTO
+    public var workout: WorkoutDTO?
 }
 
 public struct ComparisonDTO: Codable, Hashable, Sendable {

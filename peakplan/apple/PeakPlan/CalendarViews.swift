@@ -155,8 +155,14 @@ struct DayCell: View {
                 }
             }
             ForEach(store.activities(on: day)) { a in
-                Label("\(a.title) · \(Fmt.duration(a.durationSec))", systemImage: "checkmark.seal")
-                    .font(.caption2).foregroundStyle(.green)
+                // Recorded but not paired with a plan: tap to pair it.
+                NavigationLink {
+                    ComparisonView(item: ReviewItemDTO(date: day, state: .unplanned, activity: a))
+                } label: {
+                    Label("\(a.title) · \(Fmt.duration(a.durationSec))", systemImage: "link.badge.plus")
+                        .font(.caption2).foregroundStyle(.orange)
+                }
+                .buttonStyle(.plain)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 60, alignment: .topLeading)
