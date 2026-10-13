@@ -31,10 +31,16 @@ final class WatchModel {
     }
 
     func loadScheduled() async {
-        if await WorkoutScheduler.shared.authorizationState != .authorized {
-            _ = await WorkoutScheduler.shared.requestAuthorization()
-        }
-        scheduled = await WorkoutScheduler.shared.scheduledWorkouts
+        scheduled = await Self.fetchScheduled()
+    }
+
+    /// Runs off the main actor: WorkoutScheduler's authorization state isn't Sendable.
+    private nonisolated static func fetchScheduled() async -> [ScheduledWorkoutPlan] {
+        let scheduler = WorkoutScheduler.shared
+        var state = await scheduler.authorizationState
+        if state != .authorized { state = await scheduler.requestAuthorization() }
+        guard state == .authorized else { return [] }
+        return await scheduler.scheduledWorkouts
     }
 
     func workouts(on day: String) -> [WorkoutDTO] {
