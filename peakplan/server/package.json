@@ -8,7 +8,8 @@
     "start": "node --disable-warning=ExperimentalWarning dist/index.js",
     "stdio": "node --disable-warning=ExperimentalWarning dist/stdio.js",
     "test": "tsx --test test/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "start:local": "node --env-file=.env --disable-warning=ExperimentalWarning dist/index.js"
   },
   "author": "",
   "license": "ISC",
