@@ -93,7 +93,10 @@ open PeakPlan.xcodeproj
 
 1. In `project.yml`, set `DEVELOPMENT_TEAM` and replace `com.example.peakplan` (in the bundle IDs, `WKCompanionAppBundleIdentifier`, `BGTaskSchedulerPermittedIdentifiers` and `SyncCoordinator.refreshTaskID`) with your own prefix. Then run `xcodegen` again.
 2. Run **PeakPlan-iOS** on your iPhone. The Watch app installs with it. Run **PeakPlan-macOS** on the Mac.
-3. In Settings, enter the server URL and token, then fill in your thresholds.
+3. In Settings, enter the server URL and token. On iPhone, **Fill from Apple Health** pre-fills your profile:
+   - **Read from Health:** FTP (estimated by the Watch from rides with a power meter), resting HR, weight, VO2max, and your max HR (the highest recorded in the last year, or estimated from your age).
+   - **Estimated, marked "Estimate":** threshold HR, from max and resting HR, and threshold pace, from your fastest 20–70 min run in the last 4 months.
+   - You choose which values to apply.
 4. Accept the Health and Workout-scheduling permissions on the iPhone.
 
 | Platform | What it does |

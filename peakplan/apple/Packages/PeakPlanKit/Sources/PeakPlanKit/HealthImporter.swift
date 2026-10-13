@@ -19,6 +19,12 @@ public final class HealthImporter {
             .cyclingPower, .runningPower, .cyclingCadence,
         ]
         for id in ids { types.insert(HKQuantityType(id)) }
+        // For pre-filling the athlete profile.
+        let profileIds: [HKQuantityTypeIdentifier] = [
+            .restingHeartRate, .bodyMass, .vo2Max, .cyclingFunctionalThresholdPower,
+        ]
+        for id in profileIds { types.insert(HKQuantityType(id)) }
+        types.insert(HKCharacteristicType(.dateOfBirth))
         return types
     }
 
@@ -116,6 +122,126 @@ public final class HealthImporter {
             a.elevationGainM = elev.doubleValue(for: .meter())
         }
         return a
+    }
+
+    // MARK: - Profile suggestions
+
+    public struct ProfileSuggestion: Identifiable, Sendable {
+        public enum Field: String, Sendable, CaseIterable {
+            case ftp, thresholdPace, lthr, maxHr, restingHr, weight, vo2Max
+        }
+        public let field: Field
+        public let value: Double
+        /// Where the number came from, shown to the athlete.
+        public let source: String
+        /// True when calculated by PeakPlan rather than measured by Apple.
+        public let isEstimate: Bool
+        public var id: String { field.rawValue }
+    }
+
+    /// Everything Apple Health can tell us for the athlete profile. Apple stores FTP (estimated by
+    /// the Watch from rides with a power meter), resting HR, weight, VO2max and age; threshold pace,
+    /// max HR and threshold HR are estimated from workout history.
+    public func profileSuggestions() async -> [ProfileSuggestion] {
+        try? await requestAuthorization()
+        var out: [ProfileSuggestion] = []
+        let df = Date.FormatStyle(date: .abbreviated, time: .omitted)
+
+        if let ftp = await latest(.cyclingFunctionalThresholdPower, unit: .watt()) {
+            out.append(.init(field: .ftp, value: ftp.value.rounded(), source: "Apple Watch FTP estimate (\(ftp.date.formatted(df)))", isEstimate: false))
+        }
+
+        let resting = await statistic(.restingHeartRate, unit: Self.bpm, days: 30, .discreteAverage)
+        if let resting {
+            out.append(.init(field: .restingHr, value: resting.rounded(), source: "Average resting HR, last 30 days", isEstimate: false))
+        }
+
+        if let kg = await latest(.bodyMass, unit: .gramUnit(with: .kilo)) {
+            out.append(.init(field: .weight, value: (kg.value * 10).rounded() / 10, source: "Latest weight (\(kg.date.formatted(df)))", isEstimate: false))
+        }
+
+        if let vo2 = await latest(.vo2Max, unit: HKUnit(from: "ml/kg*min")) {
+            out.append(.init(field: .vo2Max, value: (vo2.value * 10).rounded() / 10, source: "Cardio Fitness (\(vo2.date.formatted(df)))", isEstimate: false))
+        }
+
+        // Max HR: the highest recorded in the last year, unless it looks like a sensor spike,
+        // otherwise the age formula (Tanaka: 208 − 0.7 × age).
+        var age: Double?
+        if let dob = try? store.dateOfBirthComponents(), let birth = Calendar.current.date(from: dob) {
+            age = Double(Calendar.current.dateComponents([.year], from: birth, to: Date()).year ?? 0)
+        }
+        let formulaMax = age.map { 208 - 0.7 * $0 }
+        let observedMax = await statistic(.heartRate, unit: Self.bpm, days: 365, .discreteMax)
+        var maxHr: Double?
+        if let observedMax, observedMax >= 140, observedMax <= (formulaMax.map { $0 + 15 } ?? 215) {
+            maxHr = observedMax.rounded()
+            out.append(.init(field: .maxHr, value: maxHr!, source: "Highest heart rate recorded in the last year", isEstimate: false))
+        } else if let formulaMax {
+            maxHr = formulaMax.rounded()
+            out.append(.init(field: .maxHr, value: maxHr!, source: "Estimated from your age (\(Int(age!)))", isEstimate: true))
+        }
+
+        // Threshold HR ≈ 85 % of heart-rate reserve above resting (≈ 88–90 % of max).
+        if let maxHr {
+            let lthr = resting.map { $0 + 0.85 * (maxHr - $0) } ?? 0.89 * maxHr
+            out.append(.init(field: .lthr, value: lthr.rounded(), source: "Estimated from max and resting HR. A 30-min test is more accurate.", isEstimate: true))
+        }
+
+        if let pace = await thresholdPaceEstimate() {
+            out.append(pace)
+        }
+        return out
+    }
+
+    /// Fastest run of 20–70 minutes in the last 4 months. A hard run of about an hour is run at
+    /// threshold pace; shorter efforts are a bit faster, so they're adjusted slightly slower.
+    private func thresholdPaceEstimate() async -> ProfileSuggestion? {
+        let start = Calendar.current.date(byAdding: .day, value: -120, to: Date())!
+        let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            HKQuery.predicateForSamples(withStart: start, end: nil),
+            HKQuery.predicateForWorkouts(with: .running),
+        ])
+        let descriptor = HKSampleQueryDescriptor(predicates: [.workout(predicate)], sortDescriptors: [], limit: 300)
+        guard let runs = try? await descriptor.result(for: store) else { return nil }
+        var best: (pace: Double, run: HKWorkout, km: Double)?
+        for run in runs where run.duration >= 20 * 60 && run.duration <= 70 * 60 {
+            guard let m = run.statistics(for: HKQuantityType(.distanceWalkingRunning))?.sumQuantity()?.doubleValue(for: .meter()),
+                  m > 3000 else { continue }
+            var pace = run.duration / (m / 1000)
+            if run.duration < 40 * 60 { pace *= 1.04 }
+            if best == nil || pace < best!.pace { best = (pace, run, m / 1000) }
+        }
+        guard let best else { return nil }
+        let day = best.run.startDate.formatted(date: .abbreviated, time: .omitted)
+        return .init(field: .thresholdPace, value: best.pace.rounded(),
+                     source: String(format: "From your fastest run of 20–70 min (%.1f km on %@)", best.km, day),
+                     isEstimate: true)
+    }
+
+    private func latest(_ id: HKQuantityTypeIdentifier, unit: HKUnit) async -> (value: Double, date: Date)? {
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.quantitySample(type: HKQuantityType(id))],
+            sortDescriptors: [SortDescriptor(\.endDate, order: .reverse)],
+            limit: 1
+        )
+        guard let sample = try? await descriptor.result(for: store).first else { return nil }
+        return (sample.quantity.doubleValue(for: unit), sample.endDate)
+    }
+
+    private func statistic(_ id: HKQuantityTypeIdentifier, unit: HKUnit, days: Int, _ option: HKStatisticsOptions) async -> Double? {
+        let start = Calendar.current.date(byAdding: .day, value: -days, to: Date())!
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: Date())
+        let descriptor = HKStatisticsQueryDescriptor(
+            predicate: .quantitySample(type: HKQuantityType(id), predicate: predicate),
+            options: option
+        )
+        guard let stats = try? await descriptor.result(for: store) else { return nil }
+        let q: HKQuantity? = switch option {
+        case .discreteMax: stats.maximumQuantity()
+        case .discreteAverage: stats.averageQuantity()
+        default: stats.sumQuantity()
+        }
+        return q?.doubleValue(for: unit)
     }
 
     static func sport(_ t: HKWorkoutActivityType) -> Sport {

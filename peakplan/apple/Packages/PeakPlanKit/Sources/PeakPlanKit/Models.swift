@@ -459,6 +459,7 @@ public struct AthleteProfile: Codable, Hashable, Sendable {
     public var weightKg: Double?
     public var goals: String = ""
     public var weeklyHoursAvailable: Double?
+    public var vo2Max: Double?
 
     public init() {}
 
@@ -475,6 +476,7 @@ public struct AthleteProfile: Codable, Hashable, Sendable {
         weightKg = try c.decodeIfPresent(Double.self, forKey: .weightKg)
         goals = try c.decodeIfPresent(String.self, forKey: .goals) ?? ""
         weeklyHoursAvailable = try c.decodeIfPresent(Double.self, forKey: .weeklyHoursAvailable)
+        vo2Max = try c.decodeIfPresent(Double.self, forKey: .vo2Max)
     }
 }
 

@@ -145,6 +145,7 @@ export const Profile = z.object({
   weightKg: z.number().positive().nullable().default(null),
   goals: z.string().default("").describe("Season goals / target events, free text for the coach."),
   weeklyHoursAvailable: z.number().nonnegative().nullable().default(null),
+  vo2Max: z.number().positive().nullable().default(null).describe("Apple Watch Cardio Fitness (ml/kg/min)."),
 });
 export type Profile = z.infer<typeof Profile>;
 
