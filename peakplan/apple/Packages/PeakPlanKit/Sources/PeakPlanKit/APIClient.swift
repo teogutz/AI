@@ -71,6 +71,10 @@ public struct APIClient: Sendable {
         _ = try await request("DELETE", "workouts/\(id)")
     }
 
+    public func status() async throws -> ServerStatusDTO {
+        try decode(await request("GET", "status"))
+    }
+
     public func profile() async throws -> AthleteProfile {
         try decode(await request("GET", "profile"))
     }

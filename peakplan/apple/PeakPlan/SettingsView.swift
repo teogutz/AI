@@ -34,6 +34,12 @@ struct SettingsView: View {
             }
 
             if let config = store.config {
+                SwiftUI.Section {
+                    NavigationLink { ServerStatusView() } label: {
+                        Label("Server status", systemImage: "server.rack")
+                    }
+                }
+
                 SwiftUI.Section("Connect Claude") {
                     let mcp = config.baseURL.appending(path: "mcp").appending(path: config.token).absoluteString
                     Text("In Claude → Settings → Connectors → Add custom connector, paste:").font(.caption)

@@ -222,3 +222,15 @@ test("pairing: plan added after import, cross-day manual pairing, unpairing", ()
   assert.equal(store.getActivity(run.id)?.workoutId, null);
   assert.equal(store.getWorkout(easy.id)?.completedActivityId, wed.id);
 });
+
+test("status endpoint", async () => {
+  const { server, base } = await startServer();
+  try {
+    const s = await (await fetch(`${base}/api/status`, { headers: { authorization: `Bearer ${TOKEN}` } })).json();
+    assert.equal(s.ok, true);
+    assert.equal(typeof s.uptimeSec, "number");
+    assert.equal(s.database.workouts, 0);
+  } finally {
+    server.close();
+  }
+});

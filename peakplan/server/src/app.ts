@@ -1,11 +1,23 @@
 import express, { NextFunction, Request, Response } from "express";
 import { timingSafeEqual } from "node:crypto";
+import { readdirSync, readFileSync, statSync, statfsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import os from "node:os";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { ZodError } from "zod";
 import { NotFound, Store } from "./store.js";
 import { buildMcpServer } from "./mcp.js";
 import { hrZonesBpm } from "./metrics.js";
 import { ProfilePatch } from "./schema.js";
+
+const STARTED_AT = new Date().toISOString();
+const VERSION = (() => {
+  try {
+    return JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version as string;
+  } catch {
+    return "unknown";
+  }
+})();
 
 export function createApp(store: Store, token: string) {
   const app = express();
@@ -115,6 +127,48 @@ export function createApp(store: Store, token: string) {
   });
   api.get("/workouts/:id/comparison", (req, res) => {
     res.json(store.comparison(req.params.id));
+  });
+
+  // Server health for the app's status screen.
+  api.get("/status", (_req, res) => {
+    const size = (f: string) => {
+      try {
+        return statSync(f).size;
+      } catch {
+        return 0;
+      }
+    };
+    let backups: { file: string; sizeBytes: number; modified: string }[] = [];
+    if (store.path !== ":memory:") {
+      const dir = join(dirname(store.path), "backups");
+      try {
+        backups = readdirSync(dir)
+          .filter((f) => f.endsWith(".db"))
+          .map((f) => {
+            const st = statSync(join(dir, f));
+            return { file: f, sizeBytes: st.size, modified: st.mtime.toISOString() };
+          })
+          .sort((a, b) => b.modified.localeCompare(a.modified));
+      } catch {}
+    }
+    let disk: { totalBytes: number; freeBytes: number } | null = null;
+    try {
+      const fs = statfsSync(store.path === ":memory:" ? "." : dirname(store.path));
+      disk = { totalBytes: fs.blocks * fs.bsize, freeBytes: fs.bavail * fs.bsize };
+    } catch {}
+    res.json({
+      ok: true,
+      version: VERSION,
+      node: process.version,
+      startedAt: STARTED_AT,
+      uptimeSec: Math.round(process.uptime()),
+      host: { loadAvg1m: os.loadavg()[0], memTotalBytes: os.totalmem(), memFreeBytes: os.freemem(), disk },
+      database: {
+        sizeBytes: store.path === ":memory:" ? 0 : size(store.path) + size(store.path + "-wal"),
+        ...store.stats(),
+      },
+      backups: { count: backups.length, latest: backups[0] ?? null },
+    });
   });
 
   api.get("/summary", (req, res) => {

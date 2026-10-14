@@ -417,6 +417,40 @@ public struct LinkResultDTO: Codable, Sendable {
     public var workout: WorkoutDTO?
 }
 
+// MARK: - Server status
+
+public struct ServerStatusDTO: Codable, Sendable {
+    public struct Host: Codable, Sendable {
+        public struct Disk: Codable, Sendable { public var totalBytes: Double; public var freeBytes: Double }
+        public var loadAvg1m: Double
+        public var memTotalBytes: Double
+        public var memFreeBytes: Double
+        public var disk: Disk?
+    }
+    public struct Database: Codable, Sendable {
+        public var sizeBytes: Double
+        public var workouts: Int
+        public var upcomingWorkouts: Int
+        public var activities: Int
+        public var lastWorkoutChange: String?
+        public var lastActivity: String?
+        public var lastImport: String?
+    }
+    public struct Backups: Codable, Sendable {
+        public struct Latest: Codable, Sendable { public var file: String; public var sizeBytes: Double; public var modified: String }
+        public var count: Int
+        public var latest: Latest?
+    }
+    public var ok: Bool
+    public var version: String
+    public var node: String
+    public var startedAt: String
+    public var uptimeSec: Double
+    public var host: Host
+    public var database: Database
+    public var backups: Backups
+}
+
 public struct ComparisonDTO: Codable, Hashable, Sendable {
     public struct Totals: Codable, Hashable, Sendable {
         public struct Planned: Codable, Hashable, Sendable {

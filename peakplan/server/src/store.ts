@@ -14,7 +14,7 @@ import { activityTss, compareWorkout, complianceColor, plannedMetrics } from "./
 export class Store {
   private db: DatabaseSync;
 
-  constructor(path: string) {
+  constructor(readonly path: string) {
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path);
     this.db.exec(`
@@ -35,6 +35,21 @@ export class Store {
       CREATE INDEX IF NOT EXISTS activities_start ON activities(start_date);
       CREATE TABLE IF NOT EXISTS profile (id INTEGER PRIMARY KEY CHECK (id = 1), json TEXT NOT NULL);
     `);
+  }
+
+  /** Counts and freshness for the status screen. */
+  stats() {
+    const one = (sql: string) => (this.db.prepare(sql).get() as any) ?? {};
+    const today = new Date().toISOString().slice(0, 10);
+    return {
+      workouts: one("SELECT COUNT(*) AS n FROM workouts").n as number,
+      upcomingWorkouts: (this.db.prepare("SELECT COUNT(*) AS n FROM workouts WHERE date >= ?").get(today) as any).n as number,
+      activities: one("SELECT COUNT(*) AS n FROM activities").n as number,
+      lastWorkoutChange: (one("SELECT MAX(updated_at) AS t FROM workouts").t as string) ?? null,
+      lastActivity: (one("SELECT MAX(start_date) AS t FROM activities").t as string) ?? null,
+      lastImport:
+        (one("SELECT MAX(json_extract(json, '$.createdAt')) AS t FROM activities").t as string) ?? null,
+    };
   }
 
   // ---------- profile ----------
