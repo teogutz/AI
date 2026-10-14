@@ -79,6 +79,12 @@ find /var/lib/peakplan/backups -name 'peakplan-*.db' -mtime +14 -delete
 CRON
 chmod +x /etc/cron.daily/peakplan-backup
 
+# If HTTPS is served by Caddy (enable-https.sh), Tailscale isn't needed.
+if [ -f /etc/caddy/Caddyfile ] && grep -q sslip.io /etc/caddy/Caddyfile; then
+  echo "==> Server URL: https://$(head -1 /etc/caddy/Caddyfile | cut -d' ' -f1)"
+  exit 0
+fi
+
 # Public HTTPS address via Tailscale Funnel: fixed URL, no open ports, no domain needed.
 if ! command -v tailscale >/dev/null; then
   curl -fsSL https://tailscale.com/install.sh | sh >/dev/null
