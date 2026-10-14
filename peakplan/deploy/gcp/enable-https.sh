@@ -22,6 +22,8 @@ echo "==> Address: https://$HOST"
 gcloud compute ssh "$VM" --zone "$ZONE" --project "$PROJECT" --quiet --command "sudo bash -s" <<REMOTE
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
+# Tailscale Funnel/Serve would hold port 443.
+if command -v tailscale >/dev/null; then tailscale funnel reset 2>/dev/null || true; tailscale serve reset 2>/dev/null || true; fi
 command -v caddy >/dev/null || { apt-get update -qq; apt-get install -y -qq caddy >/dev/null; }
 cat > /etc/caddy/Caddyfile <<CADDY
 $HOST {
