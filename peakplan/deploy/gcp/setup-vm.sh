@@ -89,7 +89,7 @@ if ! tailscale status >/dev/null 2>&1; then
   tailscale up --hostname=peakplan
 fi
 echo "==> Turning on Tailscale Funnel (if asked, open the link to allow Funnel, then come back)"
-tailscale funnel --bg 8787 >/dev/null
+tailscale funnel --bg 8787
 HOST=$(tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')
 echo
 echo "============================================================"
