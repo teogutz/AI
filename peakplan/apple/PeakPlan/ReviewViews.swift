@@ -413,11 +413,13 @@ struct ComparisonView: View {
     }
 
     static func repText(_ r: ComparisonDTO.RepConsistency) -> String {
-        let fmt: (Double) -> String = r.metric == "pace" ? { Fmt.pace($0) } : { "\(Int($0.rounded()))" }
-        let unit = r.metric == "pace" ? "s/km" : r.unit
-        let spread = r.metric == "pace" ? "\(Int(r.spread.rounded())) s/km" : "\(Int(r.spread.rounded())) \(r.unit)"
-        let fade = r.fade == 0 ? "" : (r.fade > 0 ? " · faded \(Int(r.fade.rounded())) \(unit)" : " · negative split")
-        return "Rep spread \(spread) (best \(fmt(r.best)), worst \(fmt(r.worst)))\(fade)"
+        // Pace is shown as min:ss per km (or per 100 m), never raw seconds.
+        let isPace = r.metric == "pace"
+        let unit = isPace ? (r.unit == "s/100m" ? "min/100m" : "min/km") : r.unit
+        let fmt: (Double) -> String = isPace ? { Fmt.pace($0) } : { "\(Int($0.rounded()))" }
+        let spread = "\(fmt(r.spread)) \(unit)"
+        let fade = r.fade == 0 ? "" : (r.fade > 0 ? " · faded \(fmt(r.fade)) \(unit)" : " · negative split")
+        return "Rep spread \(spread) (best \(fmt(r.best)), worst \(fmt(r.worst)) \(unit))\(fade)"
     }
 
     static func rpeLabel(_ v: Int) -> String {
@@ -434,7 +436,7 @@ struct ComparisonView: View {
 extension ComparisonDTO.Target {
     func format(_ v: Double) -> String {
         switch metric {
-        case "pace": "\(Fmt.pace(v))\(unit == "s/100m" ? "/100m" : "/km")"
+        case "pace": "\(Fmt.pace(v)) \(unit == "s/100m" ? "min/100m" : "min/km")"
         case "heart_rate": "\(Int(v.rounded())) bpm"
         case "power": "\(Int(v.rounded())) W"
         default: "\(Int(v.rounded())) \(unit)"
@@ -511,6 +513,13 @@ struct StepComparisonRow: View {
 struct TargetChart: View {
     let steps: [ComparisonDTO.Step]
 
+    static func axisUnit(metric: String, unit: String?) -> String {
+        switch metric {
+        case "pace": unit == "s/100m" ? "min/100m" : "min/km"
+        default: unit ?? ""
+        }
+    }
+
     var body: some View {
         // Chart the workout's main metric (the one most steps target).
         let counts = Dictionary(grouping: steps.compactMap(\.target?.metric), by: { $0 }).mapValues(\.count)
@@ -533,7 +542,17 @@ struct TargetChart: View {
                 }
             }
             .chartYScale(domain: .automatic(includesZero: false, reversed: metric == "pace"))
-            .chartYAxisLabel(shown.first?.target?.unit ?? "")
+            .chartYAxis {
+                AxisMarks(position: .leading) { value in
+                    AxisGridLine()
+                    AxisValueLabel {
+                        if let v = value.as(Double.self) {
+                            Text(metric == "pace" ? Fmt.pace(v) : "\(Int(v.rounded()))")
+                        }
+                    }
+                }
+            }
+            .chartYAxisLabel(Self.axisUnit(metric: metric, unit: shown.first?.target?.unit))
             .chartXAxisLabel("Step")
             .frame(height: 180)
         }
@@ -582,7 +601,7 @@ struct ExtraLapRow: View {
         var parts = [Fmt.duration(lap.durationSec)]
         if let m = lap.distanceM, m > 0 {
             parts.append(Fmt.distance(m))
-            parts.append(Fmt.pace(lap.durationSec / (m / 1000)) + " /km")
+            parts.append(Fmt.pace(lap.durationSec / (m / 1000)) + " min/km")
         }
         if let hr = lap.avgHr { parts.append("\(Int(hr)) bpm") }
         return parts.joined(separator: " · ")
@@ -610,7 +629,7 @@ struct DecouplingRow: View {
     private var color: Color { d.rating == "good" ? .green : d.rating == "moderate" ? .orange : .red }
 
     private var detail: String {
-        let p = { (h: DecouplingDTO.Half) in h.paceSecPerKm.map { Fmt.pace($0) + "/km @ " } ?? "" }
+        let p = { (h: DecouplingDTO.Half) in h.paceSecPerKm.map { Fmt.pace($0) + " min/km @ " } ?? "" }
         return "1st half \(p(d.firstHalf))\(Int(d.firstHalf.avgHr)) bpm → 2nd half \(p(d.secondHalf))\(Int(d.secondHalf.avgHr)) bpm. Under 5 % on a steady run = good aerobic durability."
     }
 }
