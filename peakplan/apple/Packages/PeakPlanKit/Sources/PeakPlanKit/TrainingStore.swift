@@ -79,13 +79,29 @@ public final class TrainingStore {
     }
 
     public func save(_ workout: WorkoutDTO) async {
+        let previous = workouts[workout.id]
         workouts[workout.id] = workout // optimistic
         guard let api else { return }
         do {
             workouts[workout.id] = try await api.save(workout)
             saveCache()
+        } catch APIError.http(409, _) {
+            // Someone (e.g. Claude) changed this workout after we loaded it: never overwrite that.
+            workouts[workout.id] = previous
+            await reload(workout.id)
+            lastError = "“\(workout.title)” was changed elsewhere (e.g. by Claude) after you opened it. "
+                + "It has been reloaded with the latest version; please make your edit again."
         } catch {
             lastError = error.localizedDescription
+        }
+    }
+
+    /// Fetches the latest copy of one workout (before editing, so edits start from current data).
+    public func reload(_ id: String) async {
+        guard let api else { return }
+        if let fresh = try? await api.workout(id: id) {
+            workouts[id] = fresh
+            saveCache()
         }
     }
 

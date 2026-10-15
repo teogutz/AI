@@ -354,7 +354,7 @@ test("alertMetric given inside target is kept (moved to the step) and shown in s
     });
     const w = JSON.parse((res.content as any)[0].text);
     assert.match(w.structure, /work 5 km @ 5:25-5:35 \/km \(avg alert\)/);
-    assert.match(w.structure, /recovery 3 min @ 6:40-7:10 \/km \(current alert\)/);
+    assert.match(w.structure, /recovery 3 min @ 6:40-7:10 \/km \(current alert, default\)/);
 
     const full = JSON.parse(((await client.callTool({ name: "get_workout", arguments: { id: w.id } })).content as any)[0].text);
     assert.equal(full.steps[1].alertMetric, "average");
@@ -374,4 +374,20 @@ test("alertMetric precedence: step-level wins over target-level", () => {
   });
   assert.equal((w.steps[0] as any).alertMetric, "current");
   assert.equal((w.steps[0] as any).target.alertMetric, undefined);
+});
+
+test("stale client copy cannot overwrite a newer change (409)", async () => {
+  const { store, server, base } = await startServer();
+  try {
+    const h = { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" };
+    const w = store.createWorkout({ title: "L", sport: "run", date: "2026-10-17", steps: [] });
+    const loadedAt = w.updatedAt;
+    await new Promise((r) => setTimeout(r, 5));
+    store.updateWorkout(w.id, { title: "Changed by Claude" });
+    const r = await fetch(`${base}/api/workouts`, { method: "POST", headers: h, body: JSON.stringify({ ...w, title: "Old copy", baseUpdatedAt: loadedAt }) });
+    assert.equal(r.status, 409);
+    assert.equal(store.getWorkout(w.id)!.title, "Changed by Claude");
+  } finally {
+    server.close();
+  }
 });

@@ -86,7 +86,15 @@ export function createApp(store: Store, token: string) {
   api.post("/workouts", (req, res) => {
     // Clients may supply their own UUID so offline-created workouts keep their id.
     const id = typeof req.body?.id === "string" ? req.body.id : undefined;
-    if (id && store.getWorkout(id)) {
+    const existing = id ? store.getWorkout(id) : null;
+    if (id && existing) {
+      // Optimistic concurrency: a client editing an old copy must not overwrite a newer change
+      // (e.g. one Claude just made). The app sends the updatedAt it loaded as baseUpdatedAt.
+      const base = req.body?.baseUpdatedAt;
+      if (typeof base === "string" && base !== existing.updatedAt) {
+        res.status(409).json({ error: "conflict", message: "Workout changed since it was loaded", current: existing });
+        return;
+      }
       res.json(store.updateWorkout(id, req.body));
       return;
     }

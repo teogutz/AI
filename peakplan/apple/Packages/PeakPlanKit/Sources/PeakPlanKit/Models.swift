@@ -295,9 +295,11 @@ public struct WorkoutDTO: Codable, Hashable, Identifiable, Sendable {
         let id: String, title: String, sport: Sport, location: WorkoutLocation
         let date: String?, startTime: String?, description: String, coachNotes: String
         let status: WorkoutStatus, steps: [WorkoutElement]
+        /// The server's updatedAt this edit is based on; a newer server copy rejects the save (409).
+        let baseUpdatedAt: String?
 
         private enum CodingKeys: String, CodingKey {
-            case id, title, sport, location, date, startTime, description, coachNotes, status, steps
+            case id, title, sport, location, date, startTime, description, coachNotes, status, steps, baseUpdatedAt
         }
 
         // date / startTime are sent as explicit nulls so they can be cleared (server merges updates).
@@ -313,12 +315,14 @@ public struct WorkoutDTO: Codable, Hashable, Identifiable, Sendable {
             try c.encode(coachNotes, forKey: .coachNotes)
             try c.encode(status, forKey: .status)
             try c.encode(steps, forKey: .steps)
+            try c.encodeIfPresent(baseUpdatedAt, forKey: .baseUpdatedAt)
         }
     }
 
     public var payload: Payload {
         Payload(id: id, title: title, sport: sport, location: location, date: date, startTime: startTime,
-                description: description, coachNotes: coachNotes, status: status, steps: steps)
+                description: description, coachNotes: coachNotes, status: status, steps: steps,
+                baseUpdatedAt: updatedAt)
     }
 }
 

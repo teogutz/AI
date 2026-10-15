@@ -181,9 +181,7 @@ export function describeSteps(steps: StepOrRepeat[], profile?: Pick<Profile, "wo
   // Pace/power alerts can use the step average or the current value: show which.
   const alertTag = (s: Step) =>
     s.target && (s.target.type === "pace" || s.target.type === "power")
-      ? effectiveAlertMetric(s, profile) === "average"
-        ? " (avg alert)"
-        : " (current alert)"
+      ? ` (${effectiveAlertMetric(s, profile) === "average" ? "avg" : "current"} alert${s.alertMetric ? "" : ", default"})`
       : "";
   const line = (s: Step) => `${s.name ?? s.kind} ${fmtDur(s)}${fmtTarget(s.target)}${alertTag(s)}`;
   return steps

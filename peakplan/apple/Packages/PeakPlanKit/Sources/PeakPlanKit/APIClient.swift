@@ -58,6 +58,10 @@ public struct APIClient: Sendable {
         try decode(await request("GET", "workouts", query: ["from": from, "to": to]))
     }
 
+    public func workout(id: String) async throws -> WorkoutDTO {
+        try decode(await request("GET", "workouts/\(id)"))
+    }
+
     public func library() async throws -> [WorkoutDTO] {
         try decode(await request("GET", "workouts", query: ["library": "true"]))
     }

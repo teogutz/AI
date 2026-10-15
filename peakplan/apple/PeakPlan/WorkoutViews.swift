@@ -221,11 +221,17 @@ struct WorkoutDetailView: View {
                 }
             }
             .navigationTitle(w.title)
+            .task { await store.reload(workoutID) }
             .toolbar {
-                Button("Edit") { editing = true }
+                Button("Edit") {
+                    Task {
+                        await store.reload(workoutID) // edit the latest version, not a stale copy
+                        editing = true
+                    }
+                }
             }
             .sheet(isPresented: $editing) {
-                NavigationStack { WorkoutEditorView(original: w) }
+                NavigationStack { WorkoutEditorView(original: store.workouts[workoutID] ?? w) }
                     #if os(macOS)
                     .frame(minWidth: 640, minHeight: 640)
                     #endif
