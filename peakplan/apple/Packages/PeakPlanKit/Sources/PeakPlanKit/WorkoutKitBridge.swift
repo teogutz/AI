@@ -96,7 +96,8 @@ public struct WorkoutKitBridge {
         var step = WorkoutStep(goal: .open)
         let stepGoal = goal(s.duration)
         if CustomWorkout.supportsGoal(stepGoal, activity: activity, location: location) { step.goal = stepGoal }
-        if let alert = alert(s.target), CustomWorkout.supportsAlert(alert, activity: activity, location: location) {
+        if let alert = alert(s.target, metric: alertMetric(for: s)),
+           CustomWorkout.supportsAlert(alert, activity: activity, location: location) {
             step.alert = alert
         }
         return step
@@ -111,11 +112,26 @@ public struct WorkoutKitBridge {
     }
 
     /// Absolute alert ranges; relative targets are resolved against the athlete's thresholds.
-    private func alert(_ t: StepTarget?) -> (any WorkoutAlert)? {
+    /// Average for pace on work steps (the rep average is what gets coached and it ignores GPS
+    /// noise), unless the step or the athlete's preference says otherwise; current elsewhere
+    /// (recovery jogs: stop surging). Heart-rate alerts are always current.
+    func alertMetric(for s: WorkoutStepDTO) -> WorkoutAlertMetric {
+        if let m = s.alertMetric { return m == .average ? .average : .current }
+        if case .pace = s.target, s.kind == .work {
+            return resolver.profile.workPaceAlertMetric == .average ? .average : .current
+        }
+        return .current
+    }
+
+    private func alert(_ t: StepTarget?, metric: WorkoutAlertMetric) -> (any WorkoutAlert)? {
         guard let t else { return nil }
         switch t {
         case .power:
             guard let watts = resolver.watts(t) else { return nil }
+            if metric == .average, #available(iOS 17.4, watchOS 10.4, *) {
+                let alert: PowerRangeAlert = .power(watts, unit: .watts, metric: .average)
+                return alert
+            }
             let alert: PowerRangeAlert = .power(watts, unit: .watts)
             return alert
         case .heartRateZone(let zone):
@@ -127,7 +143,7 @@ public struct WorkoutKitBridge {
             return alert
         case .pace:
             guard let speed = resolver.speed(t) else { return nil }
-            let alert: SpeedRangeAlert = .speed(speed, unit: .metersPerSecond, metric: .current)
+            let alert: SpeedRangeAlert = .speed(speed, unit: .metersPerSecond, metric: metric)
             return alert
         case .cadence(let lo, let hi):
             let alert: CadenceRangeAlert = .cadence(lo...hi)

@@ -45,6 +45,14 @@ export const Step = z.object({
   name: z.string().optional(),
   duration: Duration,
   target: Target.optional(),
+  alertMetric: z
+    .enum(["average", "current"])
+    .optional()
+    .describe(
+      "What the Watch alert compares with the pace/power target: 'average' = average for this step " +
+        "(steady reps, ignores GPS noise), 'current' = instantaneous (recovery jogs, to stop surging). " +
+        "Omit for the default: average for pace on work steps (athlete preference), current otherwise.",
+    ),
   notes: z.string().optional(),
 });
 
@@ -158,6 +166,10 @@ export const Profile = z.object({
   goals: z.string().default("").describe("Season goals / target events, free text for the coach."),
   weeklyHoursAvailable: z.number().nonnegative().nullable().default(null),
   vo2Max: z.number().positive().nullable().default(null).describe("Apple Watch Cardio Fitness (ml/kg/min)."),
+  workPaceAlertMetric: z
+    .enum(["average", "current"])
+    .default("average")
+    .describe("Default Watch pace alert on work steps: average for the rep, or current pace."),
   shoes: z
     .array(
       z.object({

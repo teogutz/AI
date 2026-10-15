@@ -264,6 +264,16 @@ struct StepEditorView: View {
                     ForEach(TargetType.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }
                 targetFields
+                switch step.target {
+                case .pace, .power:
+                    Picker("Watch alert uses", selection: $step.alertMetric) {
+                        Text("Default").tag(AlertMetric?.none)
+                        Text("Average for this step").tag(AlertMetric?.some(.average))
+                        Text("Current value").tag(AlertMetric?.some(.current))
+                    }
+                default:
+                    EmptyView()
+                }
             }
 
             SwiftUI.Section("Notes") {

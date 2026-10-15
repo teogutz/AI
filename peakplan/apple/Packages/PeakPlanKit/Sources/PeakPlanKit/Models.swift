@@ -145,6 +145,9 @@ public enum StepTarget: Codable, Hashable, Sendable {
     }
 }
 
+/// What a Watch alert compares with the target: the step's average, or the current value.
+public enum AlertMetric: String, Codable, CaseIterable, Sendable { case average, current }
+
 public struct WorkoutStepDTO: Codable, Hashable, Identifiable, Sendable {
     /// Local-only identity for SwiftUI lists; not sent to the server.
     public var id = UUID()
@@ -152,6 +155,8 @@ public struct WorkoutStepDTO: Codable, Hashable, Identifiable, Sendable {
     public var name: String?
     public var duration: StepDuration
     public var target: StepTarget?
+    /// nil = default (average for pace on work steps, per the athlete's preference; current otherwise).
+    public var alertMetric: AlertMetric?
     public var notes: String?
 
     public init(kind: StepKind, name: String? = nil, duration: StepDuration, target: StepTarget? = nil, notes: String? = nil) {
@@ -162,7 +167,7 @@ public struct WorkoutStepDTO: Codable, Hashable, Identifiable, Sendable {
         self.notes = notes
     }
 
-    private enum CodingKeys: String, CodingKey { case type, kind, name, duration, target, notes }
+    private enum CodingKeys: String, CodingKey { case type, kind, name, duration, target, alertMetric, notes }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -170,6 +175,7 @@ public struct WorkoutStepDTO: Codable, Hashable, Identifiable, Sendable {
         name = try c.decodeIfPresent(String.self, forKey: .name)
         duration = try c.decode(StepDuration.self, forKey: .duration)
         target = try c.decodeIfPresent(StepTarget.self, forKey: .target)
+        alertMetric = try? c.decodeIfPresent(AlertMetric.self, forKey: .alertMetric)
         notes = try c.decodeIfPresent(String.self, forKey: .notes)
     }
 
@@ -180,6 +186,7 @@ public struct WorkoutStepDTO: Codable, Hashable, Identifiable, Sendable {
         try c.encodeIfPresent(name, forKey: .name)
         try c.encode(duration, forKey: .duration)
         try c.encodeIfPresent(target, forKey: .target)
+        try c.encodeIfPresent(alertMetric, forKey: .alertMetric)
         try c.encodeIfPresent(notes, forKey: .notes)
     }
 }
@@ -615,6 +622,8 @@ public struct AthleteProfile: Codable, Hashable, Sendable {
     public var vo2Max: Double?
     public var shoes: [Shoe] = []
     public var defaultShoeId: String?
+    /// Default Watch pace alert on work steps.
+    public var workPaceAlertMetric: AlertMetric = .average
 
     public init() {}
 
@@ -634,6 +643,7 @@ public struct AthleteProfile: Codable, Hashable, Sendable {
         vo2Max = try c.decodeIfPresent(Double.self, forKey: .vo2Max)
         shoes = try c.decodeIfPresent([Shoe].self, forKey: .shoes) ?? []
         defaultShoeId = try c.decodeIfPresent(String.self, forKey: .defaultShoeId)
+        workPaceAlertMetric = (try? c.decodeIfPresent(AlertMetric.self, forKey: .workPaceAlertMetric)) ?? .average
     }
 }
 

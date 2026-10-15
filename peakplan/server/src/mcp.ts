@@ -8,7 +8,9 @@ const STEP_FORMAT_HELP = `
 Structured steps (rendered as intervals on the Apple Watch):
 - step:   {"type":"step","kind":"warmup|work|recovery|rest|cooldown","name"?:string,
            "duration":{"type":"time","seconds":N} | {"type":"distance","meters":N} | {"type":"open"},
-           "target"?: <target>, "notes"?:string}
+           "target"?: <target>, "alertMetric"?: "average"|"current", "notes"?:string}
+  alertMetric: whether the Watch alert uses the step's average or the current value. Default: average for
+  pace on work steps (athlete preference), current otherwise. Use current for recovery jogs; HR is always current.
 - repeat: {"type":"repeat","count":N,"steps":[step,...]}   (repeats cannot be nested)
 Targets:
 - {"type":"power","unit":"percent_ftp"|"watts","min":88,"max":94}

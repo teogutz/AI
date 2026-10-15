@@ -108,6 +108,10 @@ struct SettingsView: View {
                     NumberRow("Weight (kg)", value: $store.profile.weightKg)
                     NumberRow("VO2max (Cardio Fitness)", value: $store.profile.vo2Max)
                     NumberRow("Hours / week available", value: $store.profile.weeklyHoursAvailable)
+                    Picker("Pace alerts on work intervals", selection: $store.profile.workPaceAlertMetric) {
+                        Text("Average for the rep").tag(AlertMetric.average)
+                        Text("Current pace").tag(AlertMetric.current)
+                    }
                     TextField("Goals & target events (Claude reads this)", text: $store.profile.goals, axis: .vertical)
                     Button("Save profile") { Task { await store.saveProfile() } }
                 }
