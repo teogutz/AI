@@ -129,7 +129,29 @@ export function activityTss(a: ActivityInput, profile: Profile): number | null {
   return null;
 }
 
-export function describeSteps(steps: StepOrRepeat[]): string {
+/**
+ * Moves an alertMetric given inside `target` (where API clients naturally put it) onto the step,
+ * which is where the app and the Watch read it. Step-level wins if both are set.
+ */
+export function normalizeSteps(steps: StepOrRepeat[]): StepOrRepeat[] {
+  const fix = (s: Step): Step => {
+    const t = s.target as (Target & { alertMetric?: "average" | "current" }) | undefined;
+    if (!t || t.alertMetric === undefined) return s;
+    const { alertMetric, ...target } = t;
+    return { ...s, alertMetric: s.alertMetric ?? alertMetric, target: target as Target };
+  };
+  return steps.map((s) => (s.type === "repeat" ? { ...s, steps: s.steps.map(fix) } : fix(s)));
+}
+
+/** The alert metric the Watch will actually use for a step (mirrors WorkoutKitBridge.swift). */
+export function effectiveAlertMetric(s: Step, profile?: Pick<Profile, "workPaceAlertMetric">) {
+  if (!s.target) return null;
+  if (s.alertMetric) return s.alertMetric;
+  if (s.target.type === "pace" && s.kind === "work") return profile?.workPaceAlertMetric ?? "average";
+  return "current";
+}
+
+export function describeSteps(steps: StepOrRepeat[], profile?: Pick<Profile, "workPaceAlertMetric">): string {
   const fmtDur = (s: Step) => {
     const d = s.duration;
     if (d.type === "open") return "open";
@@ -156,7 +178,14 @@ export function describeSteps(steps: StepOrRepeat[]): string {
         return ` @ ${t.min}-${t.max} rpm`;
     }
   };
-  const line = (s: Step) => `${s.name ?? s.kind} ${fmtDur(s)}${fmtTarget(s.target)}`;
+  // Pace/power alerts can use the step average or the current value: show which.
+  const alertTag = (s: Step) =>
+    s.target && (s.target.type === "pace" || s.target.type === "power")
+      ? effectiveAlertMetric(s, profile) === "average"
+        ? " (avg alert)"
+        : " (current alert)"
+      : "";
+  const line = (s: Step) => `${s.name ?? s.kind} ${fmtDur(s)}${fmtTarget(s.target)}${alertTag(s)}`;
   return steps
     .map((s) => (s.type === "repeat" ? `${s.count}x [ ${s.steps.map(line).join(" / ")} ]` : line(s)))
     .join("\n");

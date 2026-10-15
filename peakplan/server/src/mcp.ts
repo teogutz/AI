@@ -19,12 +19,14 @@ Targets:
 - {"type":"pace","unit":"sec_per_km"|"sec_per_100m"|"percent_threshold","min":..,"max":..}
   (for sec_per_* min is the FASTER pace, e.g. min 270 max 285 = 4:30-4:45/km)
 - {"type":"cadence","min":85,"max":95}
+Any target may also carry "alertMetric":"average"|"current" (same as the step-level field).
+The returned structure shows the alert used for pace/power steps: "(avg alert)" or "(current alert)".
 Put the warm-up first and the cool-down last: the Apple Watch shows them as its own Warm Up / Cool Down phases.
 Prefer % of FTP / threshold targets so workouts scale automatically when thresholds change.`;
 
 const json = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] });
 
-function summarize(w: any) {
+function summarize(w: any, profile?: { workPaceAlertMetric: "average" | "current" }) {
   return {
     id: w.id,
     date: w.date,
@@ -35,7 +37,7 @@ function summarize(w: any) {
     plannedDurationMin: w.plannedDurationSec ? Math.round(w.plannedDurationSec / 60) : null,
     plannedDistanceKm: w.plannedDistanceM ? +(w.plannedDistanceM / 1000).toFixed(2) : null,
     plannedTss: w.plannedTss,
-    structure: describeSteps(w.steps),
+    structure: describeSteps(w.steps ?? [], profile),
     completedActivityId: w.completedActivityId,
   };
 }
@@ -84,7 +86,7 @@ export function buildMcpServer(store: Store): McpServer {
       },
       annotations: { readOnlyHint: true },
     },
-    async ({ from, to, library }) => json(store.listWorkouts({ from, to, library }).map(summarize)),
+    async ({ from, to, library }) => json(store.listWorkouts({ from, to, library }).map((w) => summarize(w, store.getProfile()))),
   );
 
   server.registerTool(
@@ -99,7 +101,7 @@ export function buildMcpServer(store: Store): McpServer {
       const w = store.getWorkout(id);
       if (!w) return { ...json({ error: "not found" }), isError: true };
       const activity = w.completedActivityId ? store.getActivity(w.completedActivityId) : null;
-      return json({ ...w, structure: describeSteps(w.steps), completedActivity: activity });
+      return json({ ...w, structure: describeSteps(w.steps, store.getProfile()), completedActivity: activity });
     },
   );
 
@@ -116,7 +118,7 @@ export function buildMcpServer(store: Store): McpServer {
       json(
         store.listActivities({ from, to }).map((a) => ({
           ...store.enrich(a),
-          plannedWorkout: a.workoutId ? summarize(store.getWorkout(a.workoutId) ?? {}) : null,
+          plannedWorkout: a.workoutId ? summarize(store.getWorkout(a.workoutId) ?? {}, store.getProfile()) : null,
         })),
       ),
   );
@@ -147,7 +149,7 @@ export function buildMcpServer(store: Store): McpServer {
       json(
         store.review(from, to).map((i) => ({
           ...i,
-          workout: i.workout ? summarize(i.workout) : null,
+          workout: i.workout ? summarize(i.workout, store.getProfile()) : null,
         })),
       ),
   );
@@ -179,7 +181,7 @@ export function buildMcpServer(store: Store): McpServer {
     },
     async ({ activityId, workoutId }) => {
       if (activityId)
-        return json(store.workoutCandidates(activityId).map((c) => ({ ...c, workout: summarize(c.workout) })));
+        return json(store.workoutCandidates(activityId).map((c) => ({ ...c, workout: summarize(c.workout, store.getProfile()) })));
       if (workoutId) return json(store.activityCandidates(workoutId));
       return { ...json({ error: "pass activityId or workoutId" }), isError: true };
     },
@@ -232,7 +234,7 @@ export function buildMcpServer(store: Store): McpServer {
     },
     async ({ activityId, workoutId, moveWorkoutToActivityDay }) => {
       const r = store.linkActivity(activityId, workoutId, { moveWorkout: moveWorkoutToActivityDay });
-      return json({ activityId: r.activity.id, workout: r.workout ? summarize(r.workout) : null });
+      return json({ activityId: r.activity.id, workout: r.workout ? summarize(r.workout, store.getProfile()) : null });
     },
   );
 
@@ -243,7 +245,7 @@ export function buildMcpServer(store: Store): McpServer {
       description: "Schedule a structured workout on a day (or date=null to save it to the library)." + STEP_FORMAT_HELP,
       inputSchema: WorkoutInput.shape,
     },
-    async (input) => json(summarize(store.createWorkout(input))),
+    async (input) => json(summarize(store.createWorkout(input), store.getProfile())),
   );
 
   server.registerTool(
@@ -269,7 +271,7 @@ export function buildMcpServer(store: Store): McpServer {
     },
     async ({ id, ...patch }) => {
       const clean = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
-      return json(summarize(store.updateWorkout(id, clean)));
+      return json(summarize(store.updateWorkout(id, clean), store.getProfile()));
     },
   );
 
@@ -283,7 +285,7 @@ export function buildMcpServer(store: Store): McpServer {
     async ({ id, date, startTime }) => {
       const w = store.getWorkout(id);
       if (!w) return { ...json({ error: "not found" }), isError: true };
-      return json(summarize(store.createWorkout({ ...w, date, startTime: startTime ?? w.startTime, status: "planned" })));
+      return json(summarize(store.createWorkout({ ...w, date, startTime: startTime ?? w.startTime, status: "planned" }), store.getProfile()));
     },
   );
 

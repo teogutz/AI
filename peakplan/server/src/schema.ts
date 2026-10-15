@@ -14,19 +14,25 @@ export const Duration = z.discriminatedUnion("type", [
   z.object({ type: z.literal("open") }),
 ]);
 
+export const AlertMetric = z
+  .enum(["average", "current"])
+  .describe("Watch alert compares the target with the step's average or the current value.");
+
 export const Target = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("power"),
     unit: z.enum(["percent_ftp", "watts"]),
     min: z.number().positive(),
     max: z.number().positive(),
+    alertMetric: AlertMetric.optional(),
   }),
-  z.object({ type: z.literal("heart_rate_zone"), zone: z.number().int().min(1).max(5) }),
+  z.object({ type: z.literal("heart_rate_zone"), zone: z.number().int().min(1).max(5), alertMetric: AlertMetric.optional() }),
   z.object({
     type: z.literal("heart_rate"),
     unit: z.enum(["bpm", "percent_lthr"]),
     min: z.number().positive(),
     max: z.number().positive(),
+    alertMetric: AlertMetric.optional(),
   }),
   z.object({
     type: z.literal("pace"),
@@ -35,8 +41,14 @@ export const Target = z.discriminatedUnion("type", [
     unit: z.enum(["sec_per_km", "sec_per_100m", "percent_threshold"]),
     min: z.number().positive(),
     max: z.number().positive(),
+    alertMetric: AlertMetric.optional(),
   }),
-  z.object({ type: z.literal("cadence"), min: z.number().positive(), max: z.number().positive() }),
+  z.object({
+    type: z.literal("cadence"),
+    min: z.number().positive(),
+    max: z.number().positive(),
+    alertMetric: AlertMetric.optional(),
+  }),
 ]);
 
 export const Step = z.object({
@@ -45,10 +57,7 @@ export const Step = z.object({
   name: z.string().optional(),
   duration: Duration,
   target: Target.optional(),
-  alertMetric: z
-    .enum(["average", "current"])
-    .optional()
-    .describe(
+  alertMetric: AlertMetric.optional().describe(
       "What the Watch alert compares with the pace/power target: 'average' = average for this step " +
         "(steady reps, ignores GPS noise), 'current' = instantaneous (recovery jogs, to stop surging). " +
         "Omit for the default: average for pace on work steps (athlete preference), current otherwise.",

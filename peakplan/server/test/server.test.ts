@@ -329,3 +329,38 @@ test("aerobic decoupling from half splits", () => {
   assert.ok(d.decouplingPct > 6 && d.decouplingPct < 8, String(d.decouplingPct));
   assert.equal(d.rating, "moderate");
 });
+
+test("alertMetric given inside target is kept (moved to the step) and shown in structure via MCP", async () => {
+  const { server, base } = await startServer();
+  const client = new Client({ name: "test", version: "1" });
+  try {
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp/${TOKEN}`)));
+    const tools = (await client.listTools()).tools;
+    const create = tools.find((t) => t.name === "create_workout")!;
+    assert.match(JSON.stringify(create.inputSchema), /alertMetric/);
+
+    const res = await client.callTool({
+      name: "create_workout",
+      arguments: {
+        title: "Long run",
+        sport: "run",
+        date: "2026-10-17",
+        steps: [
+          { type: "step", kind: "warmup", duration: { type: "time", seconds: 600 }, target: { type: "heart_rate_zone", zone: 2 } },
+          { type: "step", kind: "work", duration: { type: "distance", meters: 5000 }, target: { type: "pace", unit: "sec_per_km", min: 325, max: 335, alertMetric: "average" } },
+          { type: "step", kind: "recovery", duration: { type: "time", seconds: 180 }, target: { type: "pace", unit: "sec_per_km", min: 400, max: 430 } },
+        ],
+      },
+    });
+    const w = JSON.parse((res.content as any)[0].text);
+    assert.match(w.structure, /work 5 km @ 5:25-5:35 \/km \(avg alert\)/);
+    assert.match(w.structure, /recovery 3 min @ 6:40-7:10 \/km \(current alert\)/);
+
+    const full = JSON.parse(((await client.callTool({ name: "get_workout", arguments: { id: w.id } })).content as any)[0].text);
+    assert.equal(full.steps[1].alertMetric, "average");
+    assert.equal(full.steps[1].target.alertMetric, undefined);
+  } finally {
+    await client.close();
+    server.close();
+  }
+});

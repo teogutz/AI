@@ -9,7 +9,7 @@ import {
   Workout,
   WorkoutInput,
 } from "./schema.js";
-import { activityTss, compareWorkout, complianceColor, decoupling, plannedMetrics } from "./metrics.js";
+import { activityTss, compareWorkout, complianceColor, decoupling, normalizeSteps, plannedMetrics } from "./metrics.js";
 
 export class Store {
   private db: DatabaseSync;
@@ -74,9 +74,11 @@ export class Store {
   // ---------- workouts ----------
 
   private saveWorkout(w: Workout, profile = this.getProfile()): Workout {
+    const steps = normalizeSteps(w.steps);
     const full: Workout = {
       ...w,
-      ...plannedMetrics(w.steps, w.sport, profile),
+      steps,
+      ...plannedMetrics(steps, w.sport, profile),
       updatedAt: new Date().toISOString(),
     };
     this.db
