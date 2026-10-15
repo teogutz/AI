@@ -408,10 +408,13 @@ public struct ThresholdSuggestionDTO: Codable, Hashable, Identifiable, Sendable 
     /// thresholdPaceSecPerKm | ftpWatts
     public var field: String
     public var current: Double?
-    public var suggested: Double
+    /// nil when every recent effort was rejected as implausible.
+    public var suggested: Double?
     public var diffPct: Double?
     public var stale: Bool
-    public var basis: Basis
+    /// More than 5 % change: confirm before applying.
+    public var largeChange: Bool?
+    public var basis: Basis?
     public var id: String { field }
 }
 

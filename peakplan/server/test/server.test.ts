@@ -391,3 +391,29 @@ test("stale client copy cannot overwrite a newer change (409)", async () => {
     server.close();
   }
 });
+
+test("threshold check rejects GPS glitches (impossible pace, fake fast segment at easy HR, huge jumps)", () => {
+  const store = new Store(":memory:");
+  store.updateProfile({ thresholdPaceSecPerKm: 320, lthrBpm: 170 });
+  const day = new Date().toISOString().slice(0, 10);
+  // Easy 17 km run averaging 6:34/km with a corrupted 7-min segment at 2:45/km.
+  store.upsertActivity({
+    externalId: "glitch", sport: "run", title: "Run workout", startDate: `${day}T07:00:00-06:00`,
+    durationSec: 6715, distanceM: 17018, avgHr: 151,
+    laps: [{ startOffsetSec: 0, durationSec: 407, distanceM: 2468, avgHr: 153 }],
+  });
+  let [t] = store.thresholdCheck();
+  assert.equal(t.suggested, null);
+  assert.equal(t.stale, false);
+  assert.ok(t.rejectedEvidence.length >= 1);
+
+  // A real hard effort: 8 min reps at 5:01-5:13 with HR 158-165 -> ~5:10 threshold, not stale-flagged as huge.
+  const lap = (p: number, hr: number) => ({ startOffsetSec: 0, durationSec: 480, distanceM: (480 / p) * 1000, avgHr: hr });
+  store.upsertActivity({
+    externalId: "q", sport: "run", title: "Quality", startDate: `${day}T05:50:00-06:00`, durationSec: 3345, distanceM: 9550, avgHr: 154,
+    laps: [lap(301, 160), lap(313, 158), lap(310, 165)],
+  });
+  [t] = store.thresholdCheck();
+  assert.equal(t.suggested, Math.round(301 * 1.03));
+  assert.equal(t.largeChange, false);
+});

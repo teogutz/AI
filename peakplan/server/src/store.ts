@@ -164,8 +164,14 @@ export class Store {
       .get(parsed.externalId) as { json: string } | undefined;
     const prev: Activity | null = existing ? JSON.parse(existing.json) : null;
 
+    // Impossible segment speeds (GPS dropouts, overlapping split queries) are dropped at the door.
+    const maxSpeed = parsed.sport === "bike" ? 25 : parsed.sport === "swim" ? 2.5 : 7; // m/s
+    const laps = parsed.laps.map((l) =>
+      l.distanceM && l.durationSec > 0 && l.distanceM / l.durationSec > maxSpeed ? { ...l, distanceM: null } : l,
+    );
     const activity: Activity = {
       ...parsed,
+      laps,
       // Re-imports must not wipe the athlete's feedback or a manual pairing.
       rpe: parsed.rpe ?? prev?.rpe ?? null,
       notes: parsed.notes || prev?.notes || "",
@@ -344,35 +350,76 @@ export class Store {
     const shoes = new Map(profile.shoes.map((s) => [s.id, s]));
     const out: any[] = [];
 
-    // Run threshold pace: fastest sustained segment (laps 6-60 min, or whole runs 20-70 min).
-    type Ev = { est: number; date: string; title: string; durationMin: number; paceSecPerKm: number; superShoe: boolean };
+    // Run threshold pace: fastest *plausible* sustained segment (laps 6-60 min, whole runs 20-70 min).
+    // GPS/segment glitches produce impossible paces, so every candidate goes through guards:
+    //   1. absolute bound: no faster than ~15 % off world-record pace for that duration
+    //   2. internal consistency: a segment can't be >40 % faster than its own run unless HR backs it up
+    //   3. heart rate: a threshold-level effort has HR near threshold; fast pace at easy HR is fake
+    //   4. relative to the athlete: >10 % faster than the current threshold is rejected outright,
+    //      >5 % is suggested but flagged as a large change that needs confirming
+    type Ev = {
+      est: number; date: string; title: string; durationMin: number; paceSecPerKm: number;
+      superShoe: boolean; avgHr: number | null;
+    };
     const runEv: Ev[] = [];
+    const rejected: { date: string; title: string; durationMin: number; paceSecPerKm: number; reason: string }[] = [];
+    const lthr = profile.lthrBpm ?? (profile.maxHrBpm ? profile.maxHrBpm * 0.89 : null);
+    const current = profile.thresholdPaceSecPerKm;
     for (const a of acts.filter((x) => x.sport === "run")) {
       const superShoe = !!(a.shoeId && shoes.get(a.shoeId)?.superShoe);
-      const segs = [...(a.laps ?? []).map((l) => ({ sec: l.durationSec, m: l.distanceM ?? 0 })), { sec: a.durationSec, m: a.distanceM ?? 0 }];
+      const runPace = a.distanceM ? a.durationSec / (a.distanceM / 1000) : null;
+      const segs = [
+        ...(a.laps ?? []).map((l) => ({ sec: l.durationSec, m: l.distanceM ?? 0, hr: l.avgHr ?? null })),
+        { sec: a.durationSec, m: a.distanceM ?? 0, hr: a.avgHr ?? null },
+      ];
       for (const seg of segs) {
         if (seg.sec < 6 * 60 || seg.sec > 70 * 60 || seg.m < 1000) continue;
         const pace = seg.sec / (seg.m / 1000);
-        if (pace < 150 || pace > 600) continue; // GPS glitches
-        // Shorter efforts run faster than threshold; ~60 min is threshold.
+        const info = { date: localDay(a.startDate), title: a.title, durationMin: Math.round(seg.sec / 60), paceSecPerKm: Math.round(pace) };
+        const reject = (reason: string) => rejected.push({ ...info, reason });
+        if (pace > 600) continue; // walking pace: not a threshold effort, not an error
+        // 1. ~World-record pace: 2:30/km up to 15 min, 2:35 to 30 min, 2:45 to 70 min.
+        const wr = seg.sec <= 15 * 60 ? 150 : seg.sec <= 30 * 60 ? 155 : 165;
+        if (pace < wr * 1.15) {
+          reject("faster than world-class pace for this duration: GPS/segment error");
+          continue;
+        }
+        // 3. Heart rate must look like a hard effort.
+        const hardHr = seg.hr != null && lthr != null && seg.hr >= lthr * 0.88;
+        if (seg.hr != null && lthr != null && !hardHr) {
+          // Easy-HR segments can't set a threshold; only reject loudly if the pace is suspiciously fast.
+          if (current && pace < current) reject(`pace not matched by heart rate (${Math.round(seg.hr)} bpm)`);
+          continue;
+        }
+        // 2. A segment much faster than its own run, without HR evidence, is almost certainly a glitch.
+        if (runPace && pace < runPace * 0.6 && !hardHr) {
+          reject(`${Math.round((1 - pace / runPace) * 100)} % faster than the rest of this run`);
+          continue;
+        }
         const factor = seg.sec < 15 * 60 ? 1.03 : seg.sec < 30 * 60 ? 1.02 : seg.sec < 45 * 60 ? 1.01 : 1.0;
         const est = pace * factor * (superShoe ? 1.03 : 1);
-        runEv.push({ est, date: localDay(a.startDate), title: a.title, durationMin: Math.round(seg.sec / 60), paceSecPerKm: Math.round(pace), superShoe });
+        // 4. Relative to the athlete.
+        if (current && est < current * 0.9) {
+          reject(`implies a threshold ${Math.round((1 - est / current) * 100)} % faster than the current one`);
+          continue;
+        }
+        runEv.push({ ...info, est, superShoe, avgHr: seg.hr });
       }
     }
-    if (runEv.length) {
-      const best = runEv.reduce((x, y) => (y.est < x.est ? y : x));
-      const suggested = Math.round(best.est);
-      const current = profile.thresholdPaceSecPerKm;
-      const diffPct = current ? Math.round(((current - suggested) / current) * 1000) / 10 : null;
+    if (runEv.length || rejected.length) {
+      const best = runEv.length ? runEv.reduce((x, y) => (y.est < x.est ? y : x)) : null;
+      const suggested = best ? Math.round(best.est) : null;
+      const diffPct = current && suggested ? Math.round(((current - suggested) / current) * 1000) / 10 : null;
       out.push({
         field: "thresholdPaceSecPerKm",
         current,
         suggested,
         diffPct, // positive = recent work is faster than the profile
-        stale: current == null || (diffPct != null && diffPct > 3),
+        stale: suggested != null && (current == null || (diffPct != null && diffPct > 3)),
+        largeChange: diffPct != null && diffPct > 5, // confirm before applying
         basis: best,
-        note: "Estimate from the fastest sustained effort; confirm with a 30-min test if unsure.",
+        rejectedEvidence: rejected.slice(0, 10),
+        note: "Estimate from the fastest plausible sustained effort; confirm with a 30-min test if unsure.",
       });
     }
 

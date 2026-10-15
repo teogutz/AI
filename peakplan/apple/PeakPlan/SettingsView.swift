@@ -336,25 +336,39 @@ struct HealthProfileSheet: View {
 struct ThresholdWarningRow: View {
     @Environment(TrainingStore.self) private var store
     let t: ThresholdSuggestionDTO
+    @State private var confirming = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.headline)
-            Text(detail).font(.caption).foregroundStyle(.secondary)
-            Button("Update to \(value(t.suggested))") { Task { await store.apply(t) } }
+        if let suggested = t.suggested {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title(suggested)).font(.headline)
+                Text(detail).font(.caption).foregroundStyle(.secondary)
+                if t.largeChange == true {
+                    Label("Large change: double-check before applying.", systemImage: "exclamationmark.triangle")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+                Button("Update to \(value(suggested))") {
+                    if t.largeChange == true { confirming = true } else { Task { await store.apply(t) } }
+                }
                 .buttonStyle(.borderedProminent)
+            }
+            .padding(.vertical, 4)
+            .confirmationDialog("Change threshold by \(Int(t.diffPct ?? 0)) %?", isPresented: $confirming, titleVisibility: .visible) {
+                Button("Update to \(value(suggested))") { Task { await store.apply(t) } }
+            } message: {
+                Text("A change this large usually comes from a race or a test. If you're not sure, do a 30-min threshold test first.")
+            }
         }
-        .padding(.vertical, 4)
     }
 
     private var isPace: Bool { t.field == "thresholdPaceSecPerKm" }
-    private func value(_ v: Double) -> String { isPace ? Fmt.pace(v) + " /km" : "\(Int(v)) W" }
-    private var title: String {
-        (isPace ? "Run threshold pace: " : "FTP: ") + (t.current.map(value) ?? "not set") + " → " + value(t.suggested)
+    private func value(_ v: Double) -> String { isPace ? Fmt.pace(v) + " min/km" : "\(Int(v)) W" }
+    private func title(_ suggested: Double) -> String {
+        (isPace ? "Run threshold pace: " : "FTP: ") + (t.current.map(value) ?? "not set") + " → " + value(suggested)
     }
     private var detail: String {
-        let b = t.basis
-        let effort = isPace ? (b.paceSecPerKm.map { Fmt.pace($0) + " /km" } ?? "") : (b.watts.map { "\(Int($0)) W" } ?? "")
+        guard let b = t.basis else { return "" }
+        let effort = isPace ? (b.paceSecPerKm.map { Fmt.pace($0) + " min/km" } ?? "") : (b.watts.map { "\(Int($0)) W" } ?? "")
         let shoe = b.superShoe == true ? " in super shoes" : ""
         return "Based on \(Int(b.durationMin)) min at \(effort)\(shoe) — \(b.title), \(TodayView.pretty(b.date))."
     }

@@ -156,9 +156,10 @@ public final class TrainingStore {
 
     /// Applies a threshold suggestion to the profile and saves it.
     public func apply(_ t: ThresholdSuggestionDTO) async {
+        guard let value = t.suggested else { return }
         switch t.field {
-        case "thresholdPaceSecPerKm": profile.thresholdPaceSecPerKm = t.suggested
-        case "ftpWatts": profile.ftpWatts = t.suggested
+        case "thresholdPaceSecPerKm": profile.thresholdPaceSecPerKm = value
+        case "ftpWatts": profile.ftpWatts = value
         default: return
         }
         await saveProfile()
