@@ -54,6 +54,42 @@ struct SettingsView: View {
                     #endif
                 }
 
+                if !store.thresholdWarnings.isEmpty {
+                    SwiftUI.Section {
+                        ForEach(store.thresholdWarnings) { ThresholdWarningRow(t: $0) }
+                    } header: {
+                        Text("Thresholds look out of date")
+                    } footer: {
+                        Text("Stale thresholds distort every % target and TSS. Estimated from your fastest sustained efforts of the last 6 weeks (super-shoe runs discounted ~3 %).")
+                    }
+                }
+
+                SwiftUI.Section {
+                    ForEach($store.profile.shoes) { $shoe in
+                        HStack {
+                            TextField("Name", text: $shoe.name)
+                            Toggle("Super", isOn: $shoe.superShoe).fixedSize()
+                        }
+                        .swipeActions {
+                            Button(shoe.retired ? "Unretire" : "Retire") { shoe.retired.toggle() }.tint(.gray)
+                        }
+                        .opacity(shoe.retired ? 0.5 : 1)
+                    }
+                    .onDelete { store.profile.shoes.remove(atOffsets: $0) }
+                    Button("Add shoe") { store.profile.shoes.append(Shoe(name: "New shoe")) }
+                    if !store.profile.shoes.isEmpty {
+                        Picker("Default for runs", selection: $store.profile.defaultShoeId) {
+                            Text("None").tag(String?.none)
+                            ForEach(store.profile.shoes.filter { !$0.retired }) { Text($0.name).tag(String?.some($0.id)) }
+                        }
+                    }
+                    Button("Save shoes") { Task { await store.saveProfile() } }
+                } header: {
+                    Text("Shoes")
+                } footer: {
+                    Text("Mark carbon-plated / super-foam shoes as Super: they're worth 2–4 % on pace, so comparisons and threshold estimates account for them. Set the shoe on each run in Review.")
+                }
+
                 SwiftUI.Section("Thresholds") {
                     #if os(iOS)
                     Button {
@@ -292,3 +328,30 @@ struct HealthProfileSheet: View {
     }
 }
 #endif
+
+struct ThresholdWarningRow: View {
+    @Environment(TrainingStore.self) private var store
+    let t: ThresholdSuggestionDTO
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.headline)
+            Text(detail).font(.caption).foregroundStyle(.secondary)
+            Button("Update to \(value(t.suggested))") { Task { await store.apply(t) } }
+                .buttonStyle(.borderedProminent)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var isPace: Bool { t.field == "thresholdPaceSecPerKm" }
+    private func value(_ v: Double) -> String { isPace ? Fmt.pace(v) + " /km" : "\(Int(v)) W" }
+    private var title: String {
+        (isPace ? "Run threshold pace: " : "FTP: ") + (t.current.map(value) ?? "not set") + " → " + value(t.suggested)
+    }
+    private var detail: String {
+        let b = t.basis
+        let effort = isPace ? (b.paceSecPerKm.map { Fmt.pace($0) + " /km" } ?? "") : (b.watts.map { "\(Int($0)) W" } ?? "")
+        let shoe = b.superShoe == true ? " in super shoes" : ""
+        return "Based on \(Int(b.durationMin)) min at \(effort)\(shoe) — \(b.title), \(TodayView.pretty(b.date))."
+    }
+}

@@ -287,12 +287,23 @@ export function compareWorkout(workout: Workout, activity: Activity | null, prof
           break;
       }
     }
-    let result: "in_range" | "below" | "above" | null = null;
+    // result is about effort: too_hard / too_easy. deviation names the direction in the
+    // metric's own terms, so pace reads naturally (fewer s/km = too_fast = too_hard).
+    let result: "in_range" | "too_hard" | "too_easy" | null = null;
+    let deviation: "too_fast" | "too_slow" | "too_high" | "too_low" | null = null;
+    let deviationPct: number | null = null;
     if (actual != null && target) {
       const tol = (target.high - target.low) * 0.1 + (target.metric === "heart_rate" ? 2 : 0);
-      if (actual < target.low - tol) result = target.metric === "pace" ? "above" : "below"; // lower sec/km = faster
-      else if (actual > target.high + tol) result = target.metric === "pace" ? "below" : "above";
-      else result = "in_range";
+      const isPace = target.metric === "pace";
+      if (actual < target.low - tol) {
+        result = isPace ? "too_hard" : "too_easy";
+        deviation = isPace ? "too_fast" : "too_low";
+        deviationPct = Math.round(((actual - target.low) / target.low) * 1000) / 10;
+      } else if (actual > target.high + tol) {
+        result = isPace ? "too_easy" : "too_hard";
+        deviation = isPace ? "too_slow" : "too_high";
+        deviationPct = Math.round(((actual - target.high) / target.high) * 1000) / 10;
+      } else result = "in_range";
     }
     return {
       index: i,
@@ -306,8 +317,9 @@ export function compareWorkout(workout: Workout, activity: Activity | null, prof
       actualAvgHr: lap?.avgHr ?? null,
       actualAvgPower: lap?.avgPower ?? null,
       actualValue: actual != null ? Math.round(actual * 10) / 10 : null,
-      // "below"/"above" mean too easy / too hard (for pace: slower / faster than target).
       result,
+      deviation,
+      deviationPct,
     };
   });
 
@@ -343,6 +355,86 @@ export function compareWorkout(workout: Workout, activity: Activity | null, prof
     intervalsInRangePct: judged.length
       ? Math.round((judged.filter((s) => s.result === "in_range").length / judged.length) * 100)
       : null,
+    execution: executionSummary(judged.map((s) => s.result!)),
+    repConsistency: repConsistency(steps),
     steps,
+  };
+}
+
+/**
+ * Over- vs under-execution call for opposite coaching, so they're counted separately.
+ * verdict: on_target | over_executed (all misses too hard) | under_executed | mixed.
+ */
+export function executionSummary(results: ("in_range" | "too_hard" | "too_easy")[]) {
+  const inRange = results.filter((r) => r === "in_range").length;
+  const tooHard = results.filter((r) => r === "too_hard").length;
+  const tooEasy = results.filter((r) => r === "too_easy").length;
+  const verdict =
+    results.length === 0
+      ? null
+      : tooHard === 0 && tooEasy === 0
+        ? "on_target"
+        : tooEasy === 0
+          ? "over_executed"
+          : tooHard === 0
+            ? "under_executed"
+            : "mixed";
+  return { judged: results.length, inRange, tooHard, tooEasy, verdict };
+}
+
+/**
+ * Spread between the fastest and slowest work rep (same metric as the targets), the most
+ * coachable number for repeated intervals. For pace, "best" is the fastest (fewest s/km).
+ */
+export function repConsistency(
+  steps: { kind: string; target: { metric: string; unit: string } | null; actualValue: number | null }[],
+) {
+  const work = steps.filter((s) => s.kind === "work" && s.target && s.actualValue != null);
+  if (work.length < 2) return null;
+  const metric = work[0].target!.metric;
+  const values = work.filter((s) => s.target!.metric === metric).map((s) => s.actualValue!);
+  if (values.length < 2) return null;
+  const lowerIsBetter = metric === "pace";
+  const best = lowerIsBetter ? Math.min(...values) : Math.max(...values);
+  const worst = lowerIsBetter ? Math.max(...values) : Math.min(...values);
+  const mean = values.reduce((a, b) => a + b, 0) / values.length;
+  const sd = Math.sqrt(values.reduce((a, v) => a + (v - mean) ** 2, 0) / values.length);
+  const r1 = (n: number) => Math.round(n * 10) / 10;
+  return {
+    metric,
+    unit: work[0].target!.unit,
+    reps: values.length,
+    values: values.map(r1),
+    best: r1(best),
+    worst: r1(worst),
+    spread: r1(Math.abs(worst - best)),
+    cvPct: r1((sd / mean) * 100),
+    // Positive = later reps slower/weaker than the first ones (fade); negative = negative split.
+    fade: r1(lowerIsBetter ? values[values.length - 1] - values[0] : values[0] - values[values.length - 1]),
+  };
+}
+
+/**
+ * Aerobic decoupling (Pa:HR): efficiency (speed or power per heartbeat) in the second half vs the
+ * first. Under ~5 % on a steady long run means good aerobic durability. Needs half splits.
+ */
+export function decoupling(a: Activity) {
+  const h1 = a.firstHalf;
+  const h2 = a.secondHalf;
+  if (!h1 || !h2 || !h1.avgHr || !h2.avgHr || a.durationSec < 40 * 60) return null;
+  const out = (h: NonNullable<Activity["firstHalf"]>) =>
+    h.avgPower && (a.sport === "bike" || a.sport === "row") ? h.avgPower : h.distanceM ? h.distanceM / h.durationSec : null;
+  const o1 = out(h1);
+  const o2 = out(h2);
+  if (!o1 || !o2) return null;
+  const ef1 = o1 / h1.avgHr;
+  const ef2 = o2 / h2.avgHr;
+  const pct = Math.round(((ef1 - ef2) / ef1) * 1000) / 10;
+  return {
+    decouplingPct: pct,
+    rating: pct < 5 ? "good" : pct < 8 ? "moderate" : "high",
+    firstHalf: { avgHr: Math.round(h1.avgHr), paceSecPerKm: h1.distanceM ? Math.round(h1.durationSec / (h1.distanceM / 1000)) : null },
+    secondHalf: { avgHr: Math.round(h2.avgHr), paceSecPerKm: h2.distanceM ? Math.round(h2.durationSec / (h2.distanceM / 1000)) : null },
+    note: "Meaningful for steady efforts; interval sessions and hilly routes inflate it.",
   };
 }

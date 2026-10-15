@@ -69,7 +69,9 @@ The iPhone/Mac Settings screen shows the connector URL with a Copy button.
 | `create_workout` / `update_workout` / `copy_workout` / `delete_workout` | Build, move, rewrite, skip or remove workouts |
 | `list_activities` / `add_activity_feedback` | Completed workouts from Apple Health (with per-step laps); RPE and notes |
 | `review_completed_workouts` | Completed / missed / skipped / unplanned sessions with a compliance colour |
-| `compare_workout` | Planned vs. actual for one session, interval by interval against each target |
+| `compare_workout` | Planned vs. actual for one session, interval by interval against each target. Each interval gets `result` (in_range / too_hard / too_easy) and `deviation`: pace reads too_fast / too_slow, power and HR read too_high / too_low. Also returns over/under-execution counts, rep consistency (spread, CV, fade), cardiac drift and the shoe worn. |
+| `check_thresholds` | Flags a stale threshold pace or FTP by checking recent hard efforts. Runs in super shoes are discounted. |
+| `get_quality_trends` | Rep consistency per interval session and aerobic decoupling per long run, over time |
 | `get_training_summary` | Weekly planned vs. done (hours, TSS, compliance, by sport) and CTL/ATL/TSB |
 | prompt `weekly_review` | "Review my last 4 weeks and build next week" |
 

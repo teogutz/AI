@@ -71,6 +71,10 @@ public struct APIClient: Sendable {
         _ = try await request("DELETE", "workouts/\(id)")
     }
 
+    public func thresholds() async throws -> [ThresholdSuggestionDTO] {
+        try decode(await request("GET", "thresholds"))
+    }
+
     public func status() async throws -> ServerStatusDTO {
         try decode(await request("GET", "status"))
     }
@@ -99,6 +103,19 @@ public struct APIClient: Sendable {
     public func updateActivity(id: String, rpe: Double?, notes: String, workoutId: String?) async throws -> ActivityDTO {
         struct Patch: Encodable { let rpe: Double?; let notes: String; let workoutId: String? }
         return try decode(await request("PUT", "activities/\(id)", body: json(Patch(rpe: rpe, notes: notes, workoutId: workoutId))))
+    }
+
+    /// Sets the shoe worn (nil clears it).
+    public func setShoe(activityId: String, shoeId: String?) async throws -> ActivityDTO {
+        struct Patch: Encodable {
+            let shoeId: String?
+            func encode(to encoder: Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(shoeId, forKey: .shoeId)
+            }
+            enum CodingKeys: String, CodingKey { case shoeId }
+        }
+        return try decode(await request("PUT", "activities/\(activityId)", body: json(Patch(shoeId: shoeId))))
     }
 
     /// Pairs an activity with a planned workout (nil unpairs). moveWorkout moves the plan to the

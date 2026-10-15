@@ -16,6 +16,8 @@ public final class TrainingStore {
     public var isLoading = false
     public var lastError: String?
     public var lastSync: Date?
+    /// Profile thresholds that recent training clearly contradicts.
+    public var thresholdWarnings: [ThresholdSuggestionDTO] = []
 
     public init() {
         config = ServerConfig.load()
@@ -69,6 +71,7 @@ public final class TrainingStore {
             profile = prof
             lastSync = Date()
             lastError = nil
+            thresholdWarnings = ((try? await api.thresholds()) ?? []).filter(\.stale)
             saveCache()
         } catch {
             lastError = error.localizedDescription
@@ -133,6 +136,16 @@ public final class TrainingStore {
         } catch {
             lastError = error.localizedDescription
         }
+    }
+
+    /// Applies a threshold suggestion to the profile and saves it.
+    public func apply(_ t: ThresholdSuggestionDTO) async {
+        switch t.field {
+        case "thresholdPaceSecPerKm": profile.thresholdPaceSecPerKm = t.suggested
+        case "ftpWatts": profile.ftpWatts = t.suggested
+        default: return
+        }
+        await saveProfile()
     }
 
     public func upload(_ newActivities: [ActivityDTO]) async {

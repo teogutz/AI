@@ -177,7 +177,9 @@ test("review & interval comparison", () => {
   assert.equal(c.color, "green");
   assert.equal(c.intervalsMatched, true);
   assert.equal(c.steps[1].result, "in_range"); // 228 W vs 220-235
-  assert.equal(c.steps[5].result, "below"); // 205 W
+  assert.equal(c.steps[5].result, "too_easy"); // 205 W
+  assert.equal(c.steps[5].deviation, "too_low");
+  assert.equal(c.execution.verdict, "under_executed");
   assert.equal(c.steps[1].target?.low, 220);
 
   const review = store.review("2026-09-28", "2026-10-20");
@@ -264,10 +266,66 @@ test("intervals align with an extra open segment and reject km splits", () => {
   assert.equal(c.intervalsMatched, true);
   assert.equal(c.extraLaps.length, 1);
   assert.equal(c.steps[1].result, "in_range"); // 5:01/km vs 4:55-5:10
-  assert.equal(c.steps[3].result, "below"); // 5:13/km is slower than 5:10
+  assert.equal(c.steps[3].result, "too_easy"); // 5:13/km is slower than 5:10
+  assert.equal(c.steps[3].deviation, "too_slow");
+  assert.equal(c.repConsistency?.spread, 11.8); // 5:02 vs 5:14 /km
 
   // Ten 1 km auto-splits must not be mistaken for the steps.
   const splits = Array.from({ length: 10 }, () => lap(360, 1000, 155));
   store.upsertActivity({ externalId: "q", sport: "run", startDate: "2026-10-15T06:00:00-06:00", durationSec: 3345, distanceM: 9550, laps: splits });
   assert.equal(store.comparison(q.id).intervalsMatched, false);
+});
+
+test("pace faster than target is too_fast / too_hard; over-execution and rep spread", () => {
+  const store = new Store(":memory:");
+  const w = store.createWorkout({
+    title: "3x8 @ T",
+    sport: "run",
+    date: "2026-10-15",
+    steps: [1, 2, 3].map(() => ({
+      type: "step",
+      kind: "work",
+      duration: { type: "time", seconds: 480 },
+      target: { type: "pace", unit: "sec_per_km", min: 320, max: 330 },
+    })),
+  });
+  const lap = (paceSec: number) => ({ startOffsetSec: 0, durationSec: 480, distanceM: (480 / paceSec) * 1000 });
+  store.upsertActivity({ externalId: "t", sport: "run", startDate: "2026-10-15T06:00:00-06:00", durationSec: 1440, laps: [lap(301), lap(305), lap(313)] });
+  const c = store.comparison(w.id);
+  assert.equal(c.steps[0].result, "too_hard");
+  assert.equal(c.steps[0].deviation, "too_fast");
+  assert.ok(c.steps[0].deviationPct! < 0);
+  assert.equal(c.execution.verdict, "over_executed");
+  assert.equal(c.execution.tooHard, 3);
+  assert.equal(c.repConsistency?.spread, 12);
+  assert.equal(c.repConsistency?.best, 301);
+  assert.equal(c.repConsistency?.fade, 12);
+  assert.equal(store.qualityTrends("2026-10-01", "2026-10-31").repConsistency.length, 1);
+});
+
+test("threshold check flags a stale profile; super shoes are discounted", () => {
+  const store = new Store(":memory:");
+  store.updateProfile({ thresholdPaceSecPerKm: 348, shoes: [{ id: "vf", name: "Vaporfly", superShoe: true, retired: false }] });
+  const day = new Date().toISOString().slice(0, 10);
+  const lap = (paceSec: number) => ({ startOffsetSec: 0, durationSec: 480, distanceM: (480 / paceSec) * 1000 });
+  store.upsertActivity({ externalId: "x", sport: "run", startDate: `${day}T06:00:00-06:00`, durationSec: 1500, laps: [lap(310), lap(312)] });
+  const [t] = store.thresholdCheck();
+  assert.equal(t.field, "thresholdPaceSecPerKm");
+  assert.equal(t.stale, true);
+  assert.equal(t.suggested, Math.round(310 * 1.03));
+  // Same effort in super shoes suggests a 3 % slower threshold.
+  store.upsertActivity({ externalId: "x", sport: "run", startDate: `${day}T06:00:00-06:00`, durationSec: 1500, shoeId: "vf", laps: [lap(310), lap(312)] });
+  assert.equal(store.thresholdCheck()[0].suggested, Math.round(310 * 1.03 * 1.03));
+});
+
+test("aerobic decoupling from half splits", () => {
+  const store = new Store(":memory:");
+  const a = store.upsertActivity({
+    externalId: "lr", sport: "run", startDate: "2026-10-10T07:00:00-06:00", durationSec: 6000, distanceM: 17000,
+    firstHalf: { durationSec: 3000, distanceM: 8600, avgHr: 145 },
+    secondHalf: { durationSec: 3000, distanceM: 8400, avgHr: 152 },
+  });
+  const d = store.enrich(a).decoupling!;
+  assert.ok(d.decouplingPct > 6 && d.decouplingPct < 8, String(d.decouplingPct));
+  assert.equal(d.rating, "moderate");
 });

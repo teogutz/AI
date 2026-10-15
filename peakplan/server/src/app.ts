@@ -100,7 +100,7 @@ export function createApp(store: Store, token: string) {
   });
 
   api.get("/activities", (req, res) => {
-    res.json(store.listActivities({ from: q(req.query.from), to: q(req.query.to) }));
+    res.json(store.listActivities({ from: q(req.query.from), to: q(req.query.to) }).map((a) => store.enrich(a)));
   });
   api.post("/activities", (req, res) => {
     const items = Array.isArray(req.body) ? req.body : [req.body];
@@ -169,6 +169,15 @@ export function createApp(store: Store, token: string) {
       },
       backups: { count: backups.length, latest: backups[0] ?? null },
     });
+  });
+
+  api.get("/thresholds", (_req, res) => {
+    res.json(store.thresholdCheck());
+  });
+  api.get("/trends", (req, res) => {
+    const to = q(req.query.to) ?? new Date().toISOString().slice(0, 10);
+    const from = q(req.query.from) ?? new Date(Date.parse(to) - 84 * 86_400_000).toISOString().slice(0, 10);
+    res.json(store.qualityTrends(from, to, q(req.query.sport)));
   });
 
   api.get("/summary", (req, res) => {

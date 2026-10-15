@@ -7,6 +7,13 @@ struct TodayView: View {
     var body: some View {
         List {
             let today = Day.today
+            if let t = store.thresholdWarnings.first {
+                SwiftUI.Section {
+                    ThresholdWarningRow(t: t)
+                } header: {
+                    Label("Your thresholds look out of date", systemImage: "exclamationmark.triangle")
+                }
+            }
             SwiftUI.Section("Today · \(Self.pretty(today))") {
                 let ws = store.workouts(on: today)
                 if ws.isEmpty { Text("Rest day 🛌").foregroundStyle(.secondary) }

@@ -142,6 +142,7 @@ struct ComparisonView: View {
     @State private var moveToActivityDay = true
     @State private var confirmUnpair = false
     @State private var pairing = false
+    @State private var shoeId: String?
 
     init(item: ReviewItemDTO) { _item = State(initialValue: item) }
 
@@ -150,7 +151,14 @@ struct ComparisonView: View {
             header
 
             if let c = comparison {
-                SwiftUI.Section("Planned vs. completed") { totals(c) }
+                SwiftUI.Section("Planned vs. completed") {
+                    totals(c)
+                    if let d = c.decoupling { DecouplingRow(d: d) }
+                    if let shoe = c.shoe {
+                        Label(shoe.name + (shoe.superShoe ? " · super shoe (~2–4 % faster)" : ""), systemImage: "shoe")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 if c.intervalsMatched {
                     SwiftUI.Section {
                         TargetChart(steps: c.steps)
@@ -164,7 +172,8 @@ struct ComparisonView: View {
                         Text("Intervals")
                     } footer: {
                         VStack(alignment: .leading, spacing: 4) {
-                            if let p = c.intervalsInRangePct { Text("\(Int(p))% of intervals on target") }
+                            if let e = c.execution, e.judged > 0 { Text(Self.executionText(e)) }
+                            if let r = c.repConsistency { Text(Self.repText(r)) }
                             if let n = c.stepsNotDone, n > 0 { Text("\(n) planned step\(n == 1 ? "" : "s") not done (workout ended early).") }
                             if let extra = c.extraLaps, !extra.isEmpty { Text("Extra time recorded after the plan is shown in grey.") }
                         }
@@ -201,6 +210,21 @@ struct ComparisonView: View {
                         Text("RPE \(Int(rpe)) – \(Self.rpeLabel(Int(rpe)))").font(.caption)
                     }
                     TextField("Notes for your coach (Claude reads these)", text: $notes, axis: .vertical).lineLimit(2...6)
+                    if !store.profile.shoes.isEmpty, a.sport == .run || a.sport == .walk || a.sport == .hike {
+                        Picker("Shoes", selection: Binding(get: { shoeId ?? a.shoeId }, set: { new in
+                            shoeId = new
+                            Task {
+                                guard let id = a.id else { return }
+                                _ = try? await store.client?.setShoe(activityId: id, shoeId: new)
+                                await load()
+                            }
+                        })) {
+                            Text("Not set").tag(String?.none)
+                            ForEach(store.profile.shoes.filter { !$0.retired || $0.id == a.shoeId }) { s in
+                                Text(s.name + (s.superShoe ? " ⚡︎" : "")).tag(String?.some(s.id))
+                            }
+                        }
+                    }
                     Button("Save feedback") {
                         Task { await store.updateActivity(a, rpe: hasRpe ? rpe : nil, notes: notes, workoutId: a.workoutId) }
                     }
@@ -375,6 +399,27 @@ struct ComparisonView: View {
         }
     }
 
+    static func executionText(_ e: ComparisonDTO.Execution) -> String {
+        var parts = ["\(e.inRange) of \(e.judged) on target"]
+        if e.tooHard > 0 { parts.append("\(e.tooHard) harder than planned") }
+        if e.tooEasy > 0 { parts.append("\(e.tooEasy) easier than planned") }
+        let verdict = switch e.verdict ?? "" {
+        case "over_executed": " → over-executed"
+        case "under_executed": " → under-executed"
+        case "mixed": " → mixed"
+        default: ""
+        }
+        return parts.joined(separator: " · ") + verdict
+    }
+
+    static func repText(_ r: ComparisonDTO.RepConsistency) -> String {
+        let fmt: (Double) -> String = r.metric == "pace" ? { Fmt.pace($0) } : { "\(Int($0.rounded()))" }
+        let unit = r.metric == "pace" ? "s/km" : r.unit
+        let spread = r.metric == "pace" ? "\(Int(r.spread.rounded())) s/km" : "\(Int(r.spread.rounded())) \(r.unit)"
+        let fade = r.fade == 0 ? "" : (r.fade > 0 ? " · faded \(Int(r.fade.rounded())) \(unit)" : " · negative split")
+        return "Rep spread \(spread) (best \(fmt(r.best)), worst \(fmt(r.worst)))\(fade)"
+    }
+
     static func rpeLabel(_ v: Int) -> String {
         switch v {
         case ...2: "Very easy"
@@ -405,11 +450,30 @@ extension ComparisonDTO.Step.Result {
     var symbol: String {
         switch self {
         case .inRange: "checkmark.circle.fill"
-        case .below: "arrow.down.circle.fill"
-        case .above: "arrow.up.circle.fill"
+        case .tooHard: "arrow.up.circle.fill"
+        case .tooEasy: "arrow.down.circle.fill"
+        case .unknown: "questionmark.circle"
         }
     }
-    var color: Color { self == .inRange ? .green : .orange }
+    /// Orange = harder than planned, blue = easier than planned.
+    var color: Color {
+        switch self {
+        case .inRange: .green
+        case .tooHard: .orange
+        case .tooEasy: .blue
+        case .unknown: .secondary
+        }
+    }
+}
+
+extension ComparisonDTO.Step {
+    /// e.g. "6 % too fast", "4 % too low"
+    var deviationText: String? {
+        guard let d = deviation else { return nil }
+        let words = d.replacingOccurrences(of: "_", with: " ")
+        guard let p = deviationPct else { return words }
+        return String(format: "%.0f%% ", abs(p)) + words
+    }
 }
 
 struct StepComparisonRow: View {
@@ -436,6 +500,7 @@ struct StepComparisonRow: View {
     private var actualText: String {
         var parts: [String] = []
         if let t = step.target, let v = step.actualValue { parts.append(t.format(v)) }
+        if let d = step.deviationText { parts.append(d) }
         if step.target?.metric != "heart_rate", let hr = step.actualAvgHr { parts.append("\(Int(hr)) bpm") }
         if step.target?.metric != "power", let p = step.actualAvgPower { parts.append("\(Int(p)) W") }
         return parts.isEmpty ? "" : " · " + parts.joined(separator: " · ")
@@ -521,5 +586,31 @@ struct ExtraLapRow: View {
         }
         if let hr = lap.avgHr { parts.append("\(Int(hr)) bpm") }
         return parts.joined(separator: " · ")
+    }
+}
+
+struct DecouplingRow: View {
+    let d: DecouplingDTO
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text("Cardiac drift").foregroundStyle(.secondary)
+                Spacer()
+                Text(String(format: "%.1f%%", d.decouplingPct)).bold()
+                Text(d.rating).font(.caption.bold())
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(color.opacity(0.2), in: Capsule())
+                    .foregroundStyle(color)
+            }
+            Text(detail).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var color: Color { d.rating == "good" ? .green : d.rating == "moderate" ? .orange : .red }
+
+    private var detail: String {
+        let p = { (h: DecouplingDTO.Half) in h.paceSecPerKm.map { Fmt.pace($0) + "/km @ " } ?? "" }
+        return "1st half \(p(d.firstHalf))\(Int(d.firstHalf.avgHr)) bpm → 2nd half \(p(d.secondHalf))\(Int(d.secondHalf.avgHr)) bpm. Under 5 % on a steady run = good aerobic durability."
     }
 }

@@ -103,6 +103,13 @@ export const Lap = z.object({
 });
 export type Lap = z.infer<typeof Lap>;
 
+export const Half = z.object({
+  durationSec: z.number().positive(),
+  distanceM: z.number().nullable().optional(),
+  avgHr: z.number().nullable().optional(),
+  avgPower: z.number().nullable().optional(),
+});
+
 export const ActivityInput = z.object({
   externalId: z.string().describe("Unique id from the source (e.g. HealthKit UUID)."),
   source: z.string().default("healthkit"),
@@ -121,6 +128,9 @@ export const ActivityInput = z.object({
   rpe: z.number().min(1).max(10).nullable().optional(),
   notes: z.string().default(""),
   workoutId: z.string().nullable().optional().describe("Planned workout this activity fulfils."),
+  firstHalf: Half.nullable().optional().describe("First half of the activity by time (for cardiac drift)."),
+  secondHalf: Half.nullable().optional(),
+  shoeId: z.string().nullable().optional().describe("Shoe worn (id from the profile's shoes)."),
   laps: z
     .array(Lap)
     .default([])
@@ -148,6 +158,17 @@ export const Profile = z.object({
   goals: z.string().default("").describe("Season goals / target events, free text for the coach."),
   weeklyHoursAvailable: z.number().nonnegative().nullable().default(null),
   vo2Max: z.number().positive().nullable().default(null).describe("Apple Watch Cardio Fitness (ml/kg/min)."),
+  shoes: z
+    .array(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        superShoe: z.boolean().default(false).describe("Carbon-plated / super foam: worth ~2-4 % on pace."),
+        retired: z.boolean().default(false),
+      }),
+    )
+    .default([]),
+  defaultShoeId: z.string().nullable().default(null).describe("Shoe assumed for new runs."),
 });
 export type Profile = z.infer<typeof Profile>;
 

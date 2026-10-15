@@ -298,6 +298,7 @@ struct ActivitySummary: View {
                 if let p = activity.avgPower { Metric(label: "Avg W", value: "\(Int(p))") }
                 if let t = activity.tss { Metric(label: "TSS", value: "\(Int(t))") }
             }
+            if let d = activity.decoupling { DecouplingRow(d: d) }
             if let planned, let pd = planned.plannedDurationSec, pd > 0 {
                 let pct = Int((activity.durationSec / pd * 100).rounded())
                 Text("Compliance: \(pct)% of planned duration").font(.caption).foregroundStyle(pct >= 80 && pct <= 120 ? Color.green : Color.orange)

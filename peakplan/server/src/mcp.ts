@@ -56,12 +56,15 @@ export function buildMcpServer(store: Store): McpServer {
     "get_athlete_profile",
     {
       title: "Get athlete profile",
-      description: "Thresholds (FTP, threshold pace, swim CSS, LTHR), HR zones, weight, goals and weekly availability.",
+      description:
+        "Thresholds (FTP, threshold pace, swim CSS, LTHR), HR zones, weight, goals, weekly availability, shoes, and " +
+        "thresholdWarnings when recent work contradicts the profile (stale thresholds distort targets and TSS).",
       annotations: { readOnlyHint: true },
     },
     async () => {
       const p = store.getProfile();
-      return json({ ...p, heartRateZonesBpm: hrZonesBpm(p.lthrBpm) });
+      const warnings = store.thresholdCheck().filter((t) => t.stale);
+      return json({ ...p, heartRateZonesBpm: hrZonesBpm(p.lthrBpm), thresholdWarnings: warnings });
     },
   );
 
@@ -110,7 +113,7 @@ export function buildMcpServer(store: Store): McpServer {
     async ({ from, to }) =>
       json(
         store.listActivities({ from, to }).map((a) => ({
-          ...a,
+          ...store.enrich(a),
           plannedWorkout: a.workoutId ? summarize(store.getWorkout(a.workoutId) ?? {}) : null,
         })),
       ),
@@ -152,8 +155,10 @@ export function buildMcpServer(store: Store): McpServer {
     {
       title: "Compare a workout with its plan, interval by interval",
       description:
-        "For a planned workout: planned vs. actual totals and, when the Watch recorded one segment per step, each interval's " +
-        "actual avg power / HR / pace / cadence against its target (in_range / below = too easy or slow / above = too hard or fast).",
+        "For a planned workout: planned vs. actual totals and each interval's actual avg power / HR / pace / cadence against " +
+        "its target. result is about effort (in_range / too_hard / too_easy); deviation is the direction in the metric's own " +
+        "terms (pace: too_fast / too_slow; power/HR: too_high / too_low) with deviationPct. Also: execution (over- vs " +
+        "under-executed counts), repConsistency (spread fastest–slowest work rep, CV, fade), aerobic decoupling and shoe.",
       inputSchema: { id: z.string().describe("Planned workout id") },
       annotations: { readOnlyHint: true },
     },
@@ -176,6 +181,35 @@ export function buildMcpServer(store: Store): McpServer {
       if (workoutId) return json(store.activityCandidates(workoutId));
       return { ...json({ error: "pass activityId or workoutId" }), isError: true };
     },
+  );
+
+  server.registerTool(
+    "check_thresholds",
+    {
+      title: "Check thresholds against recent work",
+      description:
+        "Estimates run threshold pace and bike FTP from the fastest sustained efforts of the last 6 weeks (adjusting for " +
+        "super shoes) and compares them with the profile. stale=true means the profile is clearly out of date.",
+      annotations: { readOnlyHint: true },
+    },
+    async () => json(store.thresholdCheck()),
+  );
+
+  server.registerTool(
+    "get_quality_trends",
+    {
+      title: "Rep consistency & cardiac drift trends",
+      description:
+        "Per session over time: rep consistency for interval workouts (spread between fastest and slowest work rep, CV, fade, " +
+        "over/under-execution) and aerobic decoupling (Pa:HR, first vs second half) for runs/rides of 40+ min, with shoes worn.",
+      inputSchema: {
+        from: z.string().describe("YYYY-MM-DD"),
+        to: z.string().describe("YYYY-MM-DD"),
+        sport: z.enum(["run", "bike", "swim", "walk", "hike", "row", "strength", "other"]).optional(),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ from, to, sport }) => json(store.qualityTrends(from, to, sport)),
   );
 
   // ----- writing -----
@@ -280,12 +314,13 @@ export function buildMcpServer(store: Store): McpServer {
     "add_activity_feedback",
     {
       title: "Annotate completed activity",
-      description: "Record RPE / notes on a completed activity (use pair_activity_with_workout to change which plan it fulfils).",
+      description: "Record RPE, notes or the shoe worn on a completed activity (use pair_activity_with_workout to change which plan it fulfils).",
       inputSchema: {
         id: z.string(),
         rpe: z.number().min(1).max(10).optional(),
         notes: z.string().optional(),
         workoutId: z.string().optional(),
+        shoeId: z.string().nullable().optional().describe("Shoe id from the profile's shoes list"),
       },
     },
     async ({ id, ...patch }) => {

@@ -47,6 +47,11 @@ public final class HealthImporter {
         for w in try await descriptor.result(for: store) where !excluding.contains(w.uuid.uuidString) {
             var a = activity(from: w)
             a.laps = await laps(for: w, sport: a.sport)
+            if w.duration >= 40 * 60 {
+                let mid = w.startDate.addingTimeInterval(w.duration / 2)
+                a.firstHalf = await half(DateInterval(start: w.startDate, end: mid), sport: a.sport)
+                a.secondHalf = await half(DateInterval(start: mid, end: w.startDate.addingTimeInterval(w.duration)), sport: a.sport)
+            }
             result.append(a)
         }
         return result
@@ -127,6 +132,20 @@ public final class HealthImporter {
             laps.append(lap)
         }
         return laps
+    }
+
+    /// Averages for one half of a workout (cardiac drift / aerobic decoupling).
+    private func half(_ interval: DateInterval, sport: Sport) async -> HalfDTO {
+        let distanceId: HKQuantityTypeIdentifier = switch sport {
+        case .bike: .distanceCycling
+        case .swim: .distanceSwimming
+        default: .distanceWalkingRunning
+        }
+        var h = HalfDTO(durationSec: interval.duration)
+        h.distanceM = await statistic(distanceId, unit: .meter(), interval, .cumulativeSum)
+        h.avgHr = await statistic(.heartRate, unit: Self.bpm, interval, .discreteAverage)
+        if sport == .bike { h.avgPower = await statistic(.cyclingPower, unit: .watt(), interval, .discreteAverage) }
+        return h
     }
 
     /// The Watch records several overlapping series at once (auto km splits, auto mile splits and,

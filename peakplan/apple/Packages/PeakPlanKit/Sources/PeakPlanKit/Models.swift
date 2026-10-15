@@ -337,6 +337,12 @@ public struct ActivityDTO: Codable, Hashable, Identifiable, Sendable {
     public var tss: Double?
     /// One per workout step / segment recorded by the Watch.
     public var laps: [LapDTO]?
+    /// First / second half by time, for cardiac drift.
+    public var firstHalf: HalfDTO?
+    public var secondHalf: HalfDTO?
+    public var shoeId: String?
+    /// Computed by the server.
+    public var decoupling: DecouplingDTO?
 
     public init(externalId: String, sport: Sport, title: String, startDate: String, durationSec: Double) {
         self.externalId = externalId
@@ -347,6 +353,55 @@ public struct ActivityDTO: Codable, Hashable, Identifiable, Sendable {
         self.durationSec = durationSec
         self.notes = ""
     }
+}
+
+public struct HalfDTO: Codable, Hashable, Sendable {
+    public var durationSec: Double
+    public var distanceM: Double?
+    public var avgHr: Double?
+    public var avgPower: Double?
+    public init(durationSec: Double) { self.durationSec = durationSec }
+}
+
+/// Aerobic decoupling (Pa:HR): drop in output per heartbeat from the first to the second half.
+public struct DecouplingDTO: Codable, Hashable, Sendable {
+    public struct Half: Codable, Hashable, Sendable { public var avgHr: Double; public var paceSecPerKm: Double? }
+    public var decouplingPct: Double
+    /// good (< 5 %) | moderate | high
+    public var rating: String
+    public var firstHalf: Half
+    public var secondHalf: Half
+}
+
+public struct Shoe: Codable, Hashable, Identifiable, Sendable {
+    public var id: String
+    public var name: String
+    /// Carbon plate / super foam: worth ~2–4 % on pace.
+    public var superShoe: Bool
+    public var retired: Bool
+    public init(id: String = UUID().uuidString.lowercased(), name: String, superShoe: Bool = false, retired: Bool = false) {
+        self.id = id; self.name = name; self.superShoe = superShoe; self.retired = retired
+    }
+}
+
+/// The server's check of a profile threshold against recent hard efforts.
+public struct ThresholdSuggestionDTO: Codable, Hashable, Identifiable, Sendable {
+    public struct Basis: Codable, Hashable, Sendable {
+        public var date: String
+        public var title: String
+        public var durationMin: Double
+        public var paceSecPerKm: Double?
+        public var watts: Double?
+        public var superShoe: Bool?
+    }
+    /// thresholdPaceSecPerKm | ftpWatts
+    public var field: String
+    public var current: Double?
+    public var suggested: Double
+    public var diffPct: Double?
+    public var stale: Bool
+    public var basis: Basis
+    public var id: String { field }
 }
 
 public struct LapDTO: Codable, Hashable, Sendable {
@@ -482,7 +537,11 @@ public struct ComparisonDTO: Codable, Hashable, Sendable {
 
     public struct Step: Codable, Hashable, Identifiable, Sendable {
         public enum Result: String, Codable, Sendable {
-            case inRange = "in_range", below, above
+            case inRange = "in_range", tooHard = "too_hard", tooEasy = "too_easy", unknown
+
+            public init(from decoder: Decoder) throws {
+                self = Result(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+            }
         }
         public var index: Int
         public var kind: StepKind
@@ -496,6 +555,9 @@ public struct ComparisonDTO: Codable, Hashable, Sendable {
         public var actualAvgPower: Double?
         public var actualValue: Double?
         public var result: Result?
+        /// Direction in the metric's own terms: too_fast / too_slow (pace), too_high / too_low.
+        public var deviation: String?
+        public var deviationPct: Double?
         public var id: Int { index }
     }
 
@@ -510,6 +572,33 @@ public struct ComparisonDTO: Codable, Hashable, Sendable {
     public var extraLaps: [LapDTO]?
     public var intervalsInRangePct: Double?
     public var steps: [Step]
+    public var execution: Execution?
+    public var repConsistency: RepConsistency?
+    public var decoupling: DecouplingDTO?
+    public var shoe: Shoe?
+
+    /// Over- vs under-execution counts (they call for opposite coaching).
+    public struct Execution: Codable, Hashable, Sendable {
+        public var judged: Int
+        public var inRange: Int
+        public var tooHard: Int
+        public var tooEasy: Int
+        /// on_target | over_executed | under_executed | mixed
+        public var verdict: String?
+    }
+
+    /// Spread between fastest and slowest work rep in the target metric.
+    public struct RepConsistency: Codable, Hashable, Sendable {
+        public var metric: String
+        public var unit: String
+        public var reps: Int
+        public var values: [Double]
+        public var best: Double
+        public var worst: Double
+        public var spread: Double
+        public var cvPct: Double
+        public var fade: Double
+    }
 }
 
 public struct AthleteProfile: Codable, Hashable, Sendable {
@@ -524,6 +613,8 @@ public struct AthleteProfile: Codable, Hashable, Sendable {
     public var goals: String = ""
     public var weeklyHoursAvailable: Double?
     public var vo2Max: Double?
+    public var shoes: [Shoe] = []
+    public var defaultShoeId: String?
 
     public init() {}
 
@@ -541,6 +632,8 @@ public struct AthleteProfile: Codable, Hashable, Sendable {
         goals = try c.decodeIfPresent(String.self, forKey: .goals) ?? ""
         weeklyHoursAvailable = try c.decodeIfPresent(Double.self, forKey: .weeklyHoursAvailable)
         vo2Max = try c.decodeIfPresent(Double.self, forKey: .vo2Max)
+        shoes = try c.decodeIfPresent([Shoe].self, forKey: .shoes) ?? []
+        defaultShoeId = try c.decodeIfPresent(String.self, forKey: .defaultShoeId)
     }
 }
 

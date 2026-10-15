@@ -9,7 +9,7 @@ import {
   Workout,
   WorkoutInput,
 } from "./schema.js";
-import { activityTss, compareWorkout, complianceColor, plannedMetrics } from "./metrics.js";
+import { activityTss, compareWorkout, complianceColor, decoupling, plannedMetrics } from "./metrics.js";
 
 export class Store {
   private db: DatabaseSync;
@@ -168,6 +168,11 @@ export class Store {
       rpe: parsed.rpe ?? prev?.rpe ?? null,
       notes: parsed.notes || prev?.notes || "",
       workoutId: prev?.manualLink ? (prev.workoutId ?? null) : (parsed.workoutId ?? prev?.workoutId ?? null),
+      shoeId:
+        parsed.shoeId ??
+        prev?.shoeId ??
+        (["run", "walk", "hike"].includes(parsed.sport) ? profile.defaultShoeId : null) ??
+        null,
       manualLink: prev?.manualLink ?? false,
       id: prev?.id ?? randomUUID(),
       tss: activityTss(parsed, profile),
@@ -189,7 +194,10 @@ export class Store {
     return row ? JSON.parse(row.json) : null;
   }
 
-  updateActivity(id: string, patch: { rpe?: number | null; notes?: string; workoutId?: string | null }): Activity {
+  updateActivity(
+    id: string,
+    patch: { rpe?: number | null; notes?: string; workoutId?: string | null; shoeId?: string | null },
+  ): Activity {
     const a = this.getActivity(id);
     if (!a) throw new NotFound(`Activity ${id} not found`);
     const { workoutId, ...feedback } = patch;
@@ -315,6 +323,100 @@ export class Store {
     return rows.map((r) => JSON.parse(r.json));
   }
 
+  // ---------- coaching insights ----------
+
+  /** Activity plus derived insights (cardiac drift, shoe) for API/MCP output. */
+  enrich(a: Activity) {
+    const shoe = this.getProfile().shoes.find((s) => s.id === a.shoeId) ?? null;
+    return { ...a, shoe, decoupling: decoupling(a) };
+  }
+
+  /**
+   * Checks the profile's thresholds against recent hard efforts (last 6 weeks). Stale thresholds
+   * silently distort %-based targets and TSS, so this flags when recent work is clearly better.
+   */
+  thresholdCheck(asOf = new Date().toISOString().slice(0, 10)) {
+    const profile = this.getProfile();
+    const from = addDays(asOf, -42);
+    const acts = this.listActivities({ from, to: asOf });
+    const shoes = new Map(profile.shoes.map((s) => [s.id, s]));
+    const out: any[] = [];
+
+    // Run threshold pace: fastest sustained segment (laps 6-60 min, or whole runs 20-70 min).
+    type Ev = { est: number; date: string; title: string; durationMin: number; paceSecPerKm: number; superShoe: boolean };
+    const runEv: Ev[] = [];
+    for (const a of acts.filter((x) => x.sport === "run")) {
+      const superShoe = !!(a.shoeId && shoes.get(a.shoeId)?.superShoe);
+      const segs = [...(a.laps ?? []).map((l) => ({ sec: l.durationSec, m: l.distanceM ?? 0 })), { sec: a.durationSec, m: a.distanceM ?? 0 }];
+      for (const seg of segs) {
+        if (seg.sec < 6 * 60 || seg.sec > 70 * 60 || seg.m < 1000) continue;
+        const pace = seg.sec / (seg.m / 1000);
+        if (pace < 150 || pace > 600) continue; // GPS glitches
+        // Shorter efforts run faster than threshold; ~60 min is threshold.
+        const factor = seg.sec < 15 * 60 ? 1.03 : seg.sec < 30 * 60 ? 1.02 : seg.sec < 45 * 60 ? 1.01 : 1.0;
+        const est = pace * factor * (superShoe ? 1.03 : 1);
+        runEv.push({ est, date: localDay(a.startDate), title: a.title, durationMin: Math.round(seg.sec / 60), paceSecPerKm: Math.round(pace), superShoe });
+      }
+    }
+    if (runEv.length) {
+      const best = runEv.reduce((x, y) => (y.est < x.est ? y : x));
+      const suggested = Math.round(best.est);
+      const current = profile.thresholdPaceSecPerKm;
+      const diffPct = current ? Math.round(((current - suggested) / current) * 1000) / 10 : null;
+      out.push({
+        field: "thresholdPaceSecPerKm",
+        current,
+        suggested,
+        diffPct, // positive = recent work is faster than the profile
+        stale: current == null || (diffPct != null && diffPct > 3),
+        basis: best,
+        note: "Estimate from the fastest sustained effort; confirm with a 30-min test if unsure.",
+      });
+    }
+
+    // Bike FTP: best 20-60 min power.
+    const bikeEv: { est: number; date: string; title: string; durationMin: number; watts: number }[] = [];
+    for (const a of acts.filter((x) => x.sport === "bike")) {
+      const segs = [...(a.laps ?? []).map((l) => ({ sec: l.durationSec, w: l.avgPower })), { sec: a.durationSec, w: a.normalizedPower ?? a.avgPower }];
+      for (const seg of segs) {
+        if (!seg.w || seg.sec < 20 * 60 || seg.sec > 70 * 60) continue;
+        const est = seg.w * (seg.sec < 30 * 60 ? 0.95 : seg.sec < 45 * 60 ? 0.97 : 1.0);
+        bikeEv.push({ est, date: localDay(a.startDate), title: a.title, durationMin: Math.round(seg.sec / 60), watts: Math.round(seg.w) });
+      }
+    }
+    if (bikeEv.length) {
+      const best = bikeEv.reduce((x, y) => (y.est > x.est ? y : x));
+      const suggested = Math.round(best.est);
+      const current = profile.ftpWatts;
+      const diffPct = current ? Math.round(((suggested - current) / current) * 1000) / 10 : null;
+      out.push({ field: "ftpWatts", current, suggested, diffPct, stale: current == null || (diffPct != null && diffPct > 3), basis: best });
+    }
+    return out;
+  }
+
+  /** Rep consistency and cardiac drift over time: the trends worth coaching from. */
+  qualityTrends(from: string, to: string, sport?: string) {
+    const profile = this.getProfile();
+    const shoes = new Map(profile.shoes.map((s) => [s.id, s]));
+    const reps: any[] = [];
+    const drift: any[] = [];
+    for (const a of this.listActivities({ from, to })) {
+      if (sport && a.sport !== sport) continue;
+      const shoe = a.shoeId ? (shoes.get(a.shoeId) ?? null) : null;
+      if (a.workoutId) {
+        const w = this.getWorkout(a.workoutId);
+        if (w) {
+          const c = compareWorkout(w, a, profile);
+          if (c.repConsistency)
+            reps.push({ date: localDay(a.startDate), title: w.title, ...c.repConsistency, execution: c.execution, shoe: shoe?.name ?? null, superShoe: !!shoe?.superShoe });
+        }
+      }
+      const d = decoupling(a);
+      if (d) drift.push({ date: localDay(a.startDate), title: a.title, durationMin: Math.round(a.durationSec / 60), ...d, shoe: shoe?.name ?? null });
+    }
+    return { repConsistency: reps, aerobicDecoupling: drift };
+  }
+
   // ---------- review (planned vs. completed) ----------
 
   /** Detailed planned-vs-actual comparison for one planned workout. */
@@ -322,7 +424,12 @@ export class Store {
     const w = this.getWorkout(workoutId);
     if (!w) throw new NotFound(`Workout ${workoutId} not found`);
     const a = w.completedActivityId ? this.getActivity(w.completedActivityId) : null;
-    return compareWorkout(w, a, this.getProfile());
+    const profile = this.getProfile();
+    return {
+      ...compareWorkout(w, a, profile),
+      decoupling: a ? decoupling(a) : null,
+      shoe: a?.shoeId ? (profile.shoes.find((s) => s.id === a.shoeId) ?? null) : null,
+    };
   }
 
   /**
