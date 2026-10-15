@@ -1,4 +1,4 @@
-import type { Activity, ActivityInput, Profile, SportT, Step, StepOrRepeat, Target, Workout } from "./schema.js";
+import type { Activity, ActivityInput, Lap, Profile, SportT, Step, StepOrRepeat, Target, Workout } from "./schema.js";
 
 // Planned-load estimates, TrainingPeaks style: TSS = hours * IF^2 * 100.
 // The Swift app has a mirror of this in PeakPlanKit/WorkoutMetrics.swift.
@@ -224,6 +224,34 @@ function lh([low, high]: readonly [number, number]) {
 }
 
 /**
+ * Recorded segments line up with planned steps when, in order, each segment's length is
+ * plausible for its step. Extra segments at the end (kept going after the plan) and a
+ * missing tail (stopped early) are allowed; auto km/mile splits are rejected because their
+ * lengths don't follow the plan.
+ */
+export function lapsAlignWithSteps(planned: Step[], laps: Lap[], sport: SportT, profile: Profile): boolean {
+  if (laps.length === 0 || planned.length === 0) return false;
+  const n = Math.min(planned.length, laps.length);
+  if (n < Math.min(planned.length, 2)) return false;
+  for (let i = 0; i < n; i++) {
+    const step = planned[i];
+    const lap = laps[i];
+    if (step.duration.type === "open") continue;
+    if (step.duration.type === "distance" && lap.distanceM) {
+      const r = lap.distanceM / step.duration.meters;
+      if (r < 0.6 || r > 1.5) return false;
+      continue;
+    }
+    const sec = stepSeconds(step, sport, profile);
+    if (!sec) continue;
+    const r = lap.durationSec / sec;
+    // The last matched step may have been cut short.
+    if (r > 1.5 || (r < 0.6 && !(i === n - 1 && laps.length <= planned.length))) return false;
+  }
+  return true;
+}
+
+/**
  * Compares a completed activity with its planned workout: totals and, when the Watch
  * recorded one segment per step, each interval's actual value against its target.
  */
@@ -235,7 +263,9 @@ export function compareWorkout(workout: Workout, activity: Activity | null, prof
 
   const planned = flatten(workout.steps);
   const laps = activity?.laps ?? [];
-  const lapsMatchSteps = laps.length > 0 && laps.length === planned.length;
+  const lapsMatchSteps = lapsAlignWithSteps(planned, laps, workout.sport, profile);
+  // Extra recorded segments after the plan (e.g. kept running after the cool-down).
+  const extraLaps = lapsMatchSteps ? laps.slice(planned.length) : [];
 
   const steps = planned.map((step, i) => {
     const lap = lapsMatchSteps ? laps[i] : undefined;
@@ -307,6 +337,9 @@ export function compareWorkout(workout: Workout, activity: Activity | null, prof
       tssPct,
     },
     intervalsMatched: lapsMatchSteps,
+    recordedSegments: laps.length,
+    stepsNotDone: lapsMatchSteps ? Math.max(0, planned.length - laps.length) : 0,
+    extraLaps,
     intervalsInRangePct: judged.length
       ? Math.round((judged.filter((s) => s.result === "in_range").length / judged.length) * 100)
       : null,

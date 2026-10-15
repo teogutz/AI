@@ -504,6 +504,10 @@ public struct ComparisonDTO: Codable, Hashable, Sendable {
     public var color: ComplianceColor
     public var totals: Totals
     public var intervalsMatched: Bool
+    public var recordedSegments: Int?
+    public var stepsNotDone: Int?
+    /// Segments recorded after the plan finished (e.g. kept running after the cool-down).
+    public var extraLaps: [LapDTO]?
     public var intervalsInRangePct: Double?
     public var steps: [Step]
 }

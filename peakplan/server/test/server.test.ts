@@ -234,3 +234,40 @@ test("status endpoint", async () => {
     server.close();
   }
 });
+
+test("intervals align with an extra open segment and reject km splits", () => {
+  const store = new Store(":memory:");
+  store.updateProfile({ thresholdPaceSecPerKm: 290, lthrBpm: 165 });
+  const q = store.createWorkout({
+    title: "Quality Run 3x8",
+    sport: "run",
+    date: "2026-10-15",
+    steps: [
+      { type: "step", kind: "warmup", duration: { type: "time", seconds: 720 } },
+      {
+        type: "repeat",
+        count: 3,
+        steps: [
+          { type: "step", kind: "work", duration: { type: "time", seconds: 480 }, target: { type: "pace", unit: "sec_per_km", min: 295, max: 310 } },
+          { type: "step", kind: "recovery", duration: { type: "time", seconds: 180 } },
+        ],
+      },
+      { type: "step", kind: "cooldown", duration: { type: "time", seconds: 480 } },
+    ],
+  });
+  // As recorded by the Watch (Apple Fitness "Intervals"), plus 3:18 of extra running.
+  const lap = (sec: number, m: number, hr: number) => ({ startOffsetSec: 0, durationSec: sec, distanceM: m, avgHr: hr });
+  const laps = [lap(720, 1830, 141), lap(480, 1590, 160), lap(180, 464, 152), lap(480, 1530, 158), lap(180, 426, 155),
+    lap(480, 1550, 165), lap(180, 415, 162), lap(480, 1270, 157), lap(198, 447, 159)];
+  store.upsertActivity({ externalId: "q", sport: "run", startDate: "2026-10-15T06:00:00-06:00", durationSec: 3345, distanceM: 9550, laps });
+  const c = store.comparison(q.id);
+  assert.equal(c.intervalsMatched, true);
+  assert.equal(c.extraLaps.length, 1);
+  assert.equal(c.steps[1].result, "in_range"); // 5:01/km vs 4:55-5:10
+  assert.equal(c.steps[3].result, "below"); // 5:13/km is slower than 5:10
+
+  // Ten 1 km auto-splits must not be mistaken for the steps.
+  const splits = Array.from({ length: 10 }, () => lap(360, 1000, 155));
+  store.upsertActivity({ externalId: "q", sport: "run", startDate: "2026-10-15T06:00:00-06:00", durationSec: 3345, distanceM: 9550, laps: splits });
+  assert.equal(store.comparison(q.id).intervalsMatched, false);
+});

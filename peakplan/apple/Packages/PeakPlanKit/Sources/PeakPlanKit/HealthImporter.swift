@@ -56,14 +56,47 @@ public final class HealthImporter {
     /// laps are used as a fallback. Each becomes a lap with its own averages, so steps can be
     /// compared with their targets.
     private func laps(for w: HKWorkout, sport: Sport) async -> [LapDTO] {
-        let events = w.workoutEvents ?? []
-        var intervals = events.filter { $0.type == .segment }.map(\.dateInterval)
-        if intervals.isEmpty { intervals = events.filter { $0.type == .lap }.map(\.dateInterval) }
-        let distanceId: HKQuantityTypeIdentifier = switch sport {
+        let distanceType: HKQuantityTypeIdentifier = switch sport {
         case .bike: .distanceCycling
         case .swim: .distanceSwimming
         default: .distanceWalkingRunning
         }
+
+        // Structured (custom/interval) workouts: the Workout app stores each step (Warm Up,
+        // Work, Recovery, Cool Down, Open) as its own HKWorkoutActivity. This is what Apple
+        // Fitness shows under "Intervals".
+        let steps = w.workoutActivities.sorted { $0.startDate < $1.startDate }
+        if steps.count > 1 {
+            var laps: [LapDTO] = []
+            for a in steps {
+                let end = a.endDate ?? a.startDate.addingTimeInterval(a.duration)
+                let interval = DateInterval(start: a.startDate, end: max(end, a.startDate))
+                func stat(_ id: HKQuantityTypeIdentifier, _ unit: HKUnit, _ option: HKStatisticsOptions) async -> Double? {
+                    if let s = a.statistics(for: HKQuantityType(id)) {
+                        let q = option.contains(.cumulativeSum) ? s.sumQuantity() : s.averageQuantity()
+                        if let q { return q.doubleValue(for: unit) }
+                    }
+                    return await statistic(id, unit: unit, interval, option)
+                }
+                var lap = LapDTO(startOffsetSec: a.startDate.timeIntervalSince(w.startDate), durationSec: interval.duration)
+                lap.distanceM = await stat(distanceType, .meter(), .cumulativeSum)
+                lap.avgHr = await stat(.heartRate, Self.bpm, .discreteAverage)
+                if sport == .bike {
+                    lap.avgPower = await stat(.cyclingPower, .watt(), .discreteAverage)
+                    lap.avgCadence = await stat(.cyclingCadence, Self.bpm, .discreteAverage)
+                } else if sport == .run {
+                    lap.avgPower = await stat(.runningPower, .watt(), .discreteAverage)
+                }
+                laps.append(lap)
+            }
+            return laps
+        }
+
+        // Otherwise use segment / lap markers (free runs: automatic km and mile splits).
+        let events = w.workoutEvents ?? []
+        var intervals = events.filter { $0.type == .segment }.map(\.dateInterval)
+        if intervals.isEmpty { intervals = events.filter { $0.type == .lap }.map(\.dateInterval) }
+        let distanceId = distanceType
         let chains = Self.chains(intervals)
         guard !chains.isEmpty else { return [] }
 

@@ -76,7 +76,7 @@ enum SyncCoordinator {
 
     static func importHealth(_ store: TrainingStore) async {
         let importer = HealthImporter()
-        let key = "peakplan.uploadedHealthWorkouts.v2" // v2: re-import once with cleaned-up intervals
+        let key = "peakplan.uploadedHealthWorkouts.v3" // v3: re-import once to pick up interval steps
         let uploaded = Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
         do {
             try await importer.requestAuthorization()

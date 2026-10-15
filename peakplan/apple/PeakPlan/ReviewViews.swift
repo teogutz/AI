@@ -155,14 +155,25 @@ struct ComparisonView: View {
                     SwiftUI.Section {
                         TargetChart(steps: c.steps)
                         ForEach(c.steps) { StepComparisonRow(step: $0) }
+                        if let extra = c.extraLaps, !extra.isEmpty {
+                            ForEach(Array(extra.enumerated()), id: \.offset) { i, lap in
+                                ExtraLapRow(index: c.steps.count + i + 1, lap: lap)
+                            }
+                        }
                     } header: {
                         Text("Intervals")
                     } footer: {
-                        if let p = c.intervalsInRangePct { Text("\(Int(p))% of intervals on target") }
+                        VStack(alignment: .leading, spacing: 4) {
+                            if let p = c.intervalsInRangePct { Text("\(Int(p))% of intervals on target") }
+                            if let n = c.stepsNotDone, n > 0 { Text("\(n) planned step\(n == 1 ? "" : "s") not done (workout ended early).") }
+                            if let extra = c.extraLaps, !extra.isEmpty { Text("Extra time recorded after the plan is shown in grey.") }
+                        }
                     }
-                } else if let a = item.activity, item.workout != nil {
+                } else if item.activity != nil, item.workout != nil {
                     SwiftUI.Section("Intervals") {
-                        Text("The Watch recorded \(a.laps?.count ?? 0) segments for \(c.steps.count) planned steps, so intervals can't be matched one-to-one. Start the workout from PeakPlan or the Workout app's scheduled list to get interval data.")
+                        Text((c.recordedSegments ?? 0) == 0
+                             ? "No interval data was recorded for this workout. Interval data is available when the workout is started from PeakPlan or from the Workout app's scheduled list."
+                             : "The \(c.recordedSegments ?? 0) recorded segments don't line up with the \(c.steps.count) planned steps (they look like automatic km splits), so intervals can't be compared. Start the workout from PeakPlan or the Workout app's scheduled list to record its steps.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -482,5 +493,33 @@ struct CandidateRow: View {
             Text("Pair").font(.subheadline.bold()).foregroundStyle(Color.accentColor)
         }
         .contentShape(Rectangle())
+    }
+}
+
+/// A segment recorded after the planned steps (e.g. "Open" in Apple Fitness).
+struct ExtraLapRow: View {
+    let index: Int
+    let lap: LapDTO
+
+    var body: some View {
+        HStack(alignment: .top) {
+            RoundedRectangle(cornerRadius: 2).fill(Color.gray).frame(width: 4)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(index). Extra (not in plan)").font(.subheadline.bold()).foregroundStyle(.secondary)
+                Text(details).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .monospacedDigit()
+    }
+
+    private var details: String {
+        var parts = [Fmt.duration(lap.durationSec)]
+        if let m = lap.distanceM, m > 0 {
+            parts.append(Fmt.distance(m))
+            parts.append(Fmt.pace(lap.durationSec / (m / 1000)) + " /km")
+        }
+        if let hr = lap.avgHr { parts.append("\(Int(hr)) bpm") }
+        return parts.joined(separator: " · ")
     }
 }
