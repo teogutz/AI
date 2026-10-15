@@ -16,7 +16,10 @@ export const Duration = z.discriminatedUnion("type", [
 
 export const AlertMetric = z
   .enum(["average", "current"])
-  .describe("Watch alert compares the target with the step's average or the current value.");
+  .describe(
+    "Watch alert compares the target with the step's average or the current value. " +
+      "If also set on the step, the step-level value wins.",
+  );
 
 export const Target = z.discriminatedUnion("type", [
   z.object({

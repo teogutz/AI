@@ -364,3 +364,14 @@ test("alertMetric given inside target is kept (moved to the step) and shown in s
     server.close();
   }
 });
+
+test("alertMetric precedence: step-level wins over target-level", () => {
+  const store = new Store(":memory:");
+  const w = store.createWorkout({
+    title: "x", sport: "run", date: "2026-10-17",
+    steps: [{ type: "step", kind: "work", alertMetric: "current", duration: { type: "time", seconds: 600 },
+      target: { type: "pace", unit: "sec_per_km", min: 300, max: 310, alertMetric: "average" } }],
+  });
+  assert.equal((w.steps[0] as any).alertMetric, "current");
+  assert.equal((w.steps[0] as any).target.alertMetric, undefined);
+});

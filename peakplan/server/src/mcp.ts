@@ -19,7 +19,8 @@ Targets:
 - {"type":"pace","unit":"sec_per_km"|"sec_per_100m"|"percent_threshold","min":..,"max":..}
   (for sec_per_* min is the FASTER pace, e.g. min 270 max 285 = 4:30-4:45/km)
 - {"type":"cadence","min":85,"max":95}
-Any target may also carry "alertMetric":"average"|"current" (same as the step-level field).
+Any target may also carry "alertMetric":"average"|"current" (same as the step-level field). Precedence:
+step-level alertMetric > target-level alertMetric > default. On save the target value is moved onto the step.
 The returned structure shows the alert used for pace/power steps: "(avg alert)" or "(current alert)".
 Put the warm-up first and the cool-down last: the Apple Watch shows them as its own Warm Up / Cool Down phases.
 Prefer % of FTP / threshold targets so workouts scale automatically when thresholds change.`;
