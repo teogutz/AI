@@ -225,6 +225,13 @@ struct StepEditorView: View {
     let sport: Sport
     let onDelete: () -> Void
     @Environment(\.dismiss) private var dismiss
+    @Environment(TrainingStore.self) private var store
+
+    /// What "Default" resolves to for this step (mirrors WorkoutKitBridge.alertMetric(for:)).
+    private var defaultAlertMetric: AlertMetric {
+        if case .pace = step.target, step.kind == .work { return store.profile.workPaceAlertMetric }
+        return .current
+    }
 
     enum DurationType: String, CaseIterable { case time = "Time", distance = "Distance", open = "Open (lap button)" }
     enum TargetType: String, CaseIterable {
@@ -267,7 +274,7 @@ struct StepEditorView: View {
                 switch step.target {
                 case .pace, .power:
                     Picker("Watch alert uses", selection: $step.alertMetric) {
-                        Text("Default").tag(AlertMetric?.none)
+                        Text("Default (\(defaultAlertMetric == .average ? "Average" : "Current"))").tag(AlertMetric?.none)
                         Text("Average for this step").tag(AlertMetric?.some(.average))
                         Text("Current value").tag(AlertMetric?.some(.current))
                     }
